@@ -11,7 +11,7 @@
   var ANSWER_MS = 20000;      // how long the launcher gets to answer
   var RENEW_MS = 210000;      // Google ends a stream after five minutes: renew at three and a half
   var STAGGER_MS = 350;       // the cameras start together, a moment apart (see startAll)
-  var TOGETHER_MOST = 2;      // how often every stream is started afresh for one blank camera, before they take turns
+  var TOGETHER_MOST = 0;      // how often every stream is started afresh for one blank camera, before they take turns
   var SOLO_MS = 4000;         // over the whole screen: a camera with no picture after this gets the TV to itself
   var WATCH_MS = 20000;       // a picture that stopped moving for two looks is started again
   var RETRY_MS = 15000, RETRY_MOST_MS = 300000;
@@ -171,18 +171,22 @@
   // and alone when it has no picture after a short while.
   function front() {
     clearTimeout(soloTimer);
-    var c = cams[at];
-    if (!big || !c || c.state === "live") return;
-    if (soloed) return solo(c);
-    if (c.parked) return swap(c);
-    soloTimer = setTimeout(function () { if (big && cams[at] === c && c.state !== "live") solo(c); }, SOLO_MS);
+    // wait until the presses stop: every start is a request to Google, which allows only a few a minute
+    soloTimer = setTimeout(function () {
+      var c = cams[at];
+      if (!big || !c || c.state === "live") return;
+      if (c.parked) return soloed ? solo(c) : swap(c);
+      if (!c.pc) return;   // waiting to try again (Google said "too many requests"): leave it
+      soloTimer = setTimeout(function () { if (big && cams[at] === c && c.state !== "live" && c.pc) solo(c); }, SOLO_MS);
+    }, 700);
   }
   function unsolo() {
     clearTimeout(soloTimer);
     if (!soloed) return;
     soloed = false;
     log("big view closed: all cameras again");
-    restartAll();
+    for (var k = 0; k < cams.length; k++) if (cams[k].parked) { cams[k].parked = false; cams[k].held = true; mark(cams[k]); }
+    startAll();
   }
   function hold(c) { if (c.state === "live") { still(c); c.held = true; } }
   function still(c) {
