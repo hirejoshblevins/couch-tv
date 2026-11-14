@@ -45,14 +45,19 @@ object GoogleHome {
     class Settings(
         val clientId: String, val clientSecret: String, val refreshToken: String, val project: String,
         val cameras: List<String>, val thermostat: Boolean, val album: String?, val photoSeconds: Int,
-        val stayAwake: Boolean, val greeting: Boolean, val restMinutes: Int,
+        val stayAwake: Boolean, val greeting: Boolean, val restMinutes: Int, val events: String?,
     )
+    class Ring(val key: String, val name: String)
     private class Cam(val device: String, val name: String)
 
     private val CLIENT_ID = Regex("[0-9A-Za-z._-]{20,200}")
     private val CLIENT_SECRET = Regex("[0-9A-Za-z_-]{10,200}")
     private val REFRESH = Regex("[0-9A-Za-z/_.-]{20,2048}")
     private val PROJECT = Regex("[0-9a-f-]{20,64}")
+    private val SUBSCRIPTION = Regex("projects/[a-z][a-z0-9-]{4,40}/subscriptions/[A-Za-z][A-Za-z0-9._~-]{2,254}")
+    private const val PUBSUB = "https://pubsub.googleapis.com/v1/"
+    private const val CHIME = "sdm.devices.events.DoorbellChime.Chime"
+    private const val RING_FRESH_MS = 90_000L   // a press older than this, found waiting, is not announced
     private val DEVICE = Regex("enterprises/[0-9a-f-]{20,64}/devices/[0-9A-Za-z_-]{10,200}")
     private val ALBUM = Regex("https://photos\\.app\\.goo\\.gl/[A-Za-z0-9]{5,40}|https://photos\\.google\\.com/share/[A-Za-z0-9_-]{20,200}\\?key=[A-Za-z0-9_-]{10,200}")
 
@@ -73,6 +78,7 @@ object GoogleHome {
         e.commit()
         cached = null; cachedFrom = null
         synchronized(lock) { access = null; cams = null; thermo = null; thermoMode = null }
+        GoogleBell.start(ctx)
     }
 
     /** The section, checked, or null when Google Home is off. */
@@ -96,7 +102,8 @@ object GoogleHome {
         val album = o.optString("album").trim().takeIf { ALBUM.matches(it) }
         return Settings(id, secret, refresh, project, names.take(MOST), o.optBoolean("thermostat", false), album,
             o.optInt("photo_seconds", 60).coerceIn(60, 3600), o.optBoolean("stay_awake", false), o.optBoolean("greeting", false),
-            o.optInt("rest_minutes", 10).coerceIn(0, 60))
+            o.optInt("rest_minutes", 10).coerceIn(0, 60),
+            o.optString("events_subscription").trim().takeIf { SUBSCRIPTION.matches(it) })
     }
 
     // ---------------------------------------------------------------- talking to Google
@@ -109,14 +116,14 @@ object GoogleHome {
     private var thermoMode: String? = null   // its mode when last read: decides which setpoint command is sent
 
     /** One call to one of Google's two addresses. The status code and the body, or -1 when it failed. */
-    private fun call(url: String, bearer: String?, form: String?, json: JSONObject?): Pair<Int, JSONObject?> {
-        if (!url.startsWith(TOKEN_URL) && !url.startsWith(API)) return -1 to null
+    private fun call(url: String, bearer: String?, form: String?, json: JSONObject?, wait: Int = 12000): Pair<Int, JSONObject?> {
+        if (!url.startsWith(TOKEN_URL) && !url.startsWith(API) && !url.startsWith(PUBSUB)) return -1 to null
         var c: HttpURLConnection? = null
         return try {
             c = URL(url).openConnection() as HttpURLConnection
             c.instanceFollowRedirects = false
             c.connectTimeout = 5000
-            c.readTimeout = 12000
+            c.readTimeout = wait
             if (bearer != null) c.setRequestProperty("Authorization", "Bearer $bearer")
             val body = form?.toByteArray() ?: json?.toString()?.toByteArray()
             if (body != null) {
@@ -201,6 +208,50 @@ object GoogleHome {
         val out = picked.distinctBy { it.device }.take(MOST)
         synchronized(lock) { cams = out; thermo = stat }
         note("devices: ${all.size} cameras that stream, showing ${out.size}, thermostat ${if (stat != null) "found" else "none"}")
+        return out
+    }
+
+    // ---------------------------------------------------------------- the doorbell
+
+    /**
+     * Waits, for up to about a minute, for someone to press a doorbell (GoogleBell.kt asks in a
+     * loop while the screen is on). Google sends its devices' events to a Pub/Sub subscription in
+     * the owner's own Cloud project; this reads that one subscription and nothing else. The
+     * doorbells that were pressed just now, none when nothing happened, or null when Google did
+     * not answer. Everything read is acknowledged, so old presses never pile up.
+     */
+    fun rings(s: Settings): List<Ring>? {
+        val sub = s.events ?: return emptyList()
+        val t = token(s) ?: return null
+        val began = System.currentTimeMillis()
+        val (code, o) = call("$PUBSUB$sub:pull", t, null, JSONObject().put("maxMessages", 20), wait = 80000)
+        if (code == 401) { token(s, force = true); return null }
+        if (code != 200 || o == null) {
+            // no answer after a long wait is only a quiet minute; no answer at once is the network
+            if (code == -1) return if (System.currentTimeMillis() - began > 20000) emptyList() else null
+            note("doorbell: Google answered $code")
+            return null
+        }
+        val got = o.optJSONArray("receivedMessages") ?: return emptyList()
+        val list = cameras(s, false) ?: emptyList()
+        val acks = JSONArray()
+        val out = mutableListOf<Ring>()
+        for (k in 0 until got.length()) {
+            val m = got.optJSONObject(k) ?: continue
+            m.optString("ackId").takeIf { it.isNotEmpty() }?.let { acks.put(it) }
+            val data = try {
+                JSONObject(String(android.util.Base64.decode(m.optJSONObject("message")?.optString("data").orEmpty(), android.util.Base64.DEFAULT), Charsets.UTF_8))
+            } catch (e: Exception) { continue }
+            val update = data.optJSONObject("resourceUpdate") ?: continue
+            if (update.optJSONObject("events")?.has(CHIME) != true) continue
+            val at = if (android.os.Build.VERSION.SDK_INT < 26) null
+                else try { java.time.OffsetDateTime.parse(data.optString("timestamp")).toInstant().toEpochMilli() } catch (e: Exception) { null }
+            if (at != null && System.currentTimeMillis() - at > RING_FRESH_MS) continue
+            val n = list.indexOfFirst { it.device == update.optString("name") }
+            if (n >= 0 && out.none { it.key == "c$n" }) out.add(Ring("c$n", list[n].name))
+        }
+        if (acks.length() > 0) call("$PUBSUB$sub:acknowledge", t, null, JSONObject().put("ackIds", acks))
+        if (out.isNotEmpty()) note("doorbell: ${out.size} pressed")
         return out
     }
 
@@ -295,7 +346,7 @@ object GoogleHome {
 
     private val PHOTO_HOSTS = setOf("photos.app.goo.gl", "photos.google.com")
     private val PICTURE = Regex("\\[\"(https://lh3\\.googleusercontent\\.com/pw/[A-Za-z0-9_-]{20,400})\",(\\d{2,5}),(\\d{2,5})")
-    private const val PHOTOS_MOST = 60
+    private const val PHOTOS_MOST = 300
 
     /**
      * The shared album's page, as anyone with the link sees it (no sign-in, no cookies). Google has
@@ -424,11 +475,18 @@ object GoogleHome {
         @JavascriptInterface
         fun on(): Boolean = settings(app) != null
 
+        /** One short line from the page for the log (what a camera tile is doing). Plain letters and digits only. */
+        @JavascriptInterface
+        fun log(what: String) {
+            val line = what.take(120).filter { it in ' '..'~' }
+            main.post { if (trusted(web.url)) note("page: $line") }
+        }
+
         @JavascriptInterface
         fun info(): String {
             val s = settings(app) ?: return "{}"
             return JSONObject().put("thermostat", s.thermostat).put("photos", s.album != null)
-                .put("photo_seconds", s.photoSeconds).put("greeting", s.greeting).put("rest_minutes", s.restMinutes).toString()
+                .put("photo_seconds", s.photoSeconds).put("greeting", s.greeting).put("rest_minutes", s.restMinutes).put("doorbell", s.events != null).toString()
         }
 
         @JavascriptInterface

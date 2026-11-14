@@ -184,6 +184,7 @@
   if (arg("cams")) {
     var camNames = ["Front Porch", "Backyard", "Kitchen camera"].slice(0, Math.max(1, Math.min(4, parseInt(arg("cams"), 10) || 3)));
     if (arg("cams") === "4") camNames = ["Front Porch", "Backyard", "Kitchen camera", "Garage"];
+    if (arg("ring")) setTimeout(function () { if (window.tv && window.tv.ring) window.tv.ring("c0"); }, 4000);
     // ?gh=1 adds a pretend thermostat (it takes the remote, nothing real changes), two of the
     // home's own scene pictures as the album, and the greeting.
     var ghAll = !!arg("gh");

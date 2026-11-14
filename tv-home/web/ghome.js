@@ -127,11 +127,41 @@
       if (same) return;
       var was = photos.length;
       photos = list;
-      if (!photos.length) { root.classList.remove("has-ghphoto"); clearTimeout(turnTimer); at = -1; return; }
+      if (!photos.length) { root.classList.remove("has-ghphoto"); clearTimeout(turnTimer); at = -1; if (pBig) { pBig = false; drawPhoto(); } return; }
       if (at >= photos.length) at = -1;
       if (!was || at < 0) showNext();
     });
   }
+
+  // ---- the remote on the frame (app.js asks, zone "photo") ----
+  // OK opens the album over the whole screen, Left and Right go through it, OK or Back closes.
+  var pFocus = false, pBig = false, bigAt = 0;
+  function photoOn() { return started && photos.length > 0 && root.classList.contains("has-ghphoto"); }
+  function large(u) { return /=w\d+-h\d+$/.test(u) ? u.replace(/=w\d+-h\d+$/, "=w1920-h1080") : u; }
+  function drawPhoto() {
+    var f = $("ghphoto"), b = $("ghbig");
+    if (f) f.className = "ghphoto" + (pFocus ? " focus" : "");
+    if (!b) return;
+    b.className = "ghbig" + (pBig ? " on" : "");
+    if (!pBig) return;
+    bigAt = (bigAt % photos.length + photos.length) % photos.length;
+    var img = $("ghbig-img"), want = large(photos[bigAt]);
+    if (img.getAttribute("src") !== want) img.src = want;
+    $("ghbig-note").textContent = (bigAt + 1) + " of " + photos.length + "   \u25C0 \u25B6   Back to close";
+  }
+  function photoPaint(on) {
+    if (!on && !pFocus && !pBig) return;
+    pFocus = !!on;
+    if (!on) pBig = false;
+    drawPhoto();
+  }
+  // Returns "right" or "down" when the press leaves the frame, else nothing.
+  function photoMove(dx, dy) {
+    if (pBig) { if (dx) { bigAt += dx; drawPhoto(); } return null; }
+    return dx > 0 ? "right" : dy > 0 ? "down" : null;
+  }
+  function photoOk() { if (!photos.length) return; pBig = !pBig; if (pBig) bigAt = Math.max(0, at); drawPhoto(); }
+  function photoBack() { if (!pBig) return false; pBig = false; drawPhoto(); return true; }
 
   // ======================= the thermostat dial =======================
   var T = null;            // what the thermostat last said
@@ -319,19 +349,64 @@
   // and the labels go, the picture dims, and the clock, the cameras and the photo drift slowly so
   // nothing stays on the same pixels (app.css, html.gh-rest). The first press only brings it all back.
   var restTimer = null, restOn = false;
+
+  // The float: each piece, shrunk a little, wanders across the whole screen at walking pace and
+  // turns back at the edges, like an old screen saver. Slow enough to read, never still.
+  var floats = [], floatFrame = 0, floatAt = 0;
+  function floatAdd(e, scale, measure) {
+    if (!e || !e.getBoundingClientRect) return;
+    var b = e.getBoundingClientRect(), m = (measure || e).getBoundingClientRect();
+    if (!b.width || !b.height) return;
+    var rem = innerWidth / 120, speed = (1.7 + Math.random() * 0.9) * rem;
+    var ang = (Math.PI / 4) + (Math.random() - 0.5) * 0.7 + Math.floor(Math.random() * 4) * Math.PI / 2;   // never straight along an edge
+    floats.push({ el: e, cx: m.left + m.width / 2, cy: b.top + b.height / 2, hw: m.width / 2, hh: b.height / 2,
+      s: 1, to: scale, x: 0, y: 0, vx: Math.cos(ang) * speed, vy: Math.sin(ang) * speed });
+  }
+  function floatStep(now) {
+    var dt = floatAt ? Math.min(0.1, (now - floatAt) / 1000) : 0;
+    floatAt = now;
+    var W = innerWidth, H = innerHeight, pad = innerWidth / 120 * 1.5;
+    for (var k = 0; k < floats.length; k++) {
+      var f = floats[k];
+      f.s += (f.to - f.s) * Math.min(1, dt * 1.2);
+      f.x += f.vx * dt; f.y += f.vy * dt;
+      var hw = f.hw * f.s, hh = f.hh * f.s, cx = f.cx + f.x, cy = f.cy + f.y;
+      if (cx - hw < pad) f.vx = Math.abs(f.vx); else if (cx + hw > W - pad) f.vx = -Math.abs(f.vx);
+      if (cy - hh < pad) f.vy = Math.abs(f.vy); else if (cy + hh > H - pad) f.vy = -Math.abs(f.vy);
+      f.el.style.transform = "translate(" + f.x.toFixed(1) + "px," + f.y.toFixed(1) + "px) scale(" + f.s.toFixed(3) + ")";
+    }
+    floatFrame = requestAnimationFrame(floatStep);
+  }
+  function floatStart() {
+    floatStop();
+    var tiles = document.querySelectorAll(".cams .cam");
+    for (var k = 0; k < tiles.length; k++) floatAdd(tiles[k], 0.62);
+    if (root.classList.contains("has-ghphoto")) floatAdd($("ghphoto"), 0.85);
+    if (root.classList.contains("has-ghstack")) floatAdd($("ghstack"), 0.8, $("gh-time"));
+    floatAt = 0;
+    if (floats.length) floatFrame = requestAnimationFrame(floatStep);
+  }
+  function floatStop() {
+    if (floatFrame) cancelAnimationFrame(floatFrame);
+    floatFrame = 0;
+    for (var k = 0; k < floats.length; k++) floats[k].el.style.transform = "";
+    floats = [];
+  }
   // app.js calls this on every press and whenever the home comes back; ok says the home itself
   // (not a menu or Settings) has the remote.
   function active(ok) {
     clearTimeout(restTimer); restTimer = null;
-    if (restOn) { restOn = false; root.classList.remove("gh-rest"); }
+    if (restOn) { restOn = false; root.classList.remove("gh-rest"); floatStop(); }
     if (!started || !ok || !info().rest_minutes || window.MOCK_NO_REST) return;
     restTimer = setTimeout(function () {
       restTimer = null;
       if (document.hidden) return;
       restOn = true;
       if (window.googleCams) window.googleCams.small();   // a camera opened over the whole screen closes
+      if (pBig) { pBig = false; drawPhoto(); }
       if (held) { held = false; drawDial(); }
       root.classList.add("gh-rest");
+      floatStart();
     }, window.MOCK_REST_MS || info().rest_minutes * 60000);
   }
   function resting() { return restOn; }
@@ -360,11 +435,13 @@
     clearTimeout(turnTimer); turnTimer = null;
     if (held) { held = false; drawDial(); }
     clearTimeout(restTimer); restTimer = null;
-    if (restOn) { restOn = false; root.classList.remove("gh-rest"); }
+    if (restOn) { restOn = false; root.classList.remove("gh-rest"); floatStop(); }
   }
   document.addEventListener("visibilitychange", function () { if (document.hidden) pause(); else resume(); });
 
   window.googleHome = { reply: reply, tick: tick, resume: resume, pause: pause,
-    thermoOn: thermoOn, paint: paint, move: move, ok: ok, back: back, active: active, resting: resting };
+    thermoOn: thermoOn, paint: paint, move: move, ok: ok, back: back, active: active, resting: resting,
+    photoOn: photoOn, photoPaint: photoPaint, photoMove: photoMove, photoOk: photoOk, photoBack: photoBack,
+    log: function (what) { try { if (native() && native().log) native().log(String(what)); } catch (e) {} } };
   resume();
 })();

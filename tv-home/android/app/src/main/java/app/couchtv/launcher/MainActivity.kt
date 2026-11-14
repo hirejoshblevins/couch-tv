@@ -102,6 +102,7 @@ class MainActivity : Activity() {
         io.execute { warmApps() }
         askWatchNextPermission()
         Doorbell.start(this)   // smart home (optional): nothing happens unless a doorbell is set up
+        GoogleBell.start(this)   // the Google Home doorbell (optional), the same way
         FireWatch.ensure(this)   // Fire TV only, and only once a computer has switched it on
         main.postDelayed({ FireWatch.rebindIfUnbound(applicationContext) }, 10_000L)   // listed but not bound after a force-stop
         // At power-on the page is often asked for before Wi-Fi is up: try again the moment it is.
@@ -155,6 +156,11 @@ class MainActivity : Activity() {
             main.postDelayed({ js("window.tv && tv.settingsKey && tv.settingsKey()") }, 250)
             return
         }
+        // The Google Home doorbell (GoogleBell.kt): open that camera over the whole screen.
+        intent.getStringExtra("gh_ring")?.let { key ->
+            if (RING_KEY.matches(key)) main.postDelayed({ js("window.tv && tv.ring && tv.ring(\"$key\")") }, 400)
+            return
+        }
         // HOME pressed while we are already in front: back to the first tile.
         js("window.tv && tv.home()")
     }
@@ -162,6 +168,7 @@ class MainActivity : Activity() {
     override fun onResume() {
         super.onResume()
         resumed = true
+        inFront = true
         restoreTimeout(resume = true)   // back in front: the normal screen timeout goes back (not for the first moments of a press, see ambientAt)
         hideSystemBars()
         // Google Home, "stay_awake": the home stays on screen, no screensaver and no sleep, for as
@@ -191,6 +198,7 @@ class MainActivity : Activity() {
     override fun onPause() {
         super.onPause()
         resumed = false
+        inFront = false
         try {
             val lp = window.attributes
             if (lp.screenBrightness == 0.0f) {
@@ -1624,6 +1632,9 @@ class MainActivity : Activity() {
     }
 
     companion object {
+        /** The home is on screen right now (GoogleBell.kt asks). */
+        @Volatile var inFront = false
+        private val RING_KEY = Regex("c[0-9]")
         @Volatile private var shown: java.lang.ref.WeakReference<MainActivity>? = null
 
         /** What onNewIntent does for a Home press, for when FireWatch brought the home back without a new intent. */

@@ -245,10 +245,11 @@ echo "     $(echo "$SMART" | head -1)"
 # values from .env go to the app the same way, on their own and never printed. "none" switches
 # the camera row off on the TV.
 GH64=$("$PY" "$HERE/home-config.py" --gh)
-echo "     $("$PY" "$HERE/home-config.py" --gh --check)"
+GHOME=$("$PY" "$HERE/home-config.py" --gh --check)
+echo "     $(echo "$GHOME" | head -1)"
 # The doorbell card shows over other apps, which needs "display over other apps". Only granted
 # when a doorbell is set up; taken back if one was set up before and is not any more.
-if echo "$SMART" | grep -qx doorbell; then
+if echo "$SMART" | grep -qx doorbell || echo "$GHOME" | grep -qx doorbell; then
   "$PY" "$T" shell "appops set app.couchtv.launcher SYSTEM_ALERT_WINDOW allow"
 elif "$PY" "$T" shell "appops get app.couchtv.launcher SYSTEM_ALERT_WINDOW" 2> /dev/null | grep -q allow; then
   "$PY" "$T" shell "appops set app.couchtv.launcher SYSTEM_ALERT_WINDOW default"

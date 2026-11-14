@@ -109,6 +109,13 @@ def google_home():
     out["photo_seconds"] = max(60, min(3600, int(secs))) if isinstance(secs, (int, float)) and not isinstance(secs, bool) else 60
     rest = gh.get("rest_minutes")
     out["rest_minutes"] = max(0, min(60, int(rest))) if isinstance(rest, (int, float)) and not isinstance(rest, bool) else 10
+    sub = str(gh.get("events_subscription") or "").strip()
+    if sub:
+        if re.fullmatch(r"projects/[a-z][a-z0-9-]{4,40}/subscriptions/[A-Za-z][A-Za-z0-9._~-]{2,254}", sub):
+            out["events_subscription"] = sub
+        else:
+            print("home-config: google_home.events_subscription must look like projects/<project>/subscriptions/<name>, "
+                  "the doorbell stays off", file=sys.stderr)
     # The shared album's link lets anyone who has it see the album, so it lives in .env like a secret.
     album = (os.environ.get("GOOGLE_PHOTOS_ALBUM_URL") or "").strip()
     if album:
@@ -127,7 +134,10 @@ if "--gh" in sys.argv:
         if gh:
             print("Google Home cameras: " + (", ".join(gh["cameras"]) if gh["cameras"] else "every shared camera")
                   + ("; thermostat" if gh["thermostat"] else "") + ("; photo album" if "album" in gh else "")
-                  + ("; greeting" if gh["greeting"] else "") + ("; stays awake" if gh["stay_awake"] else ""))
+                  + ("; greeting" if gh["greeting"] else "") + ("; stays awake" if gh["stay_awake"] else "")
+                  + ("; doorbell" if "events_subscription" in gh else ""))
+            if "events_subscription" in gh:
+                print("doorbell")
         else:
             print("Google Home cameras: off")
     else:

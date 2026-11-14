@@ -309,7 +309,7 @@
   function resetIdlePhoto() {
     // Google Home's rest mode (ghome.js) counts from the same presses
     if (window.googleHome) window.googleHome.active(!kidsOn() && !screenOffActive && !expanded && !lift &&
-      ["grid", "shelf", "people", "quick", "np", "thermo", "cams"].indexOf(zone) >= 0);
+      ["grid", "shelf", "people", "quick", "np", "thermo", "cams", "photo"].indexOf(zone) >= 0);
     clearTimeout(idlePhotoTimer);
     idlePhotoTimer = null;
     idlePhotoActive = false;
@@ -1050,6 +1050,7 @@
 
   // The bridge's reading for the place in config.json, or straight from Open-Meteo with no bridge
   // or when Home settings chose another place. Hidden when Home settings switched the weather off.
+  var wxRetry = 0;
   function refreshWeather() {
     if (!NIGHT || !WX_SHOW) {
       updateAmbientWeather();
@@ -1060,7 +1061,10 @@
       data.weather = j;
       clock();
       updateAmbientWeather();
-    }, function () {});
+    }, function () {
+      // a first try that failed (the network was still waking) is tried again soon, not in half an hour
+      if (!data.weather) { clearTimeout(wxRetry); wxRetry = setTimeout(refreshWeather, 45000); if (window.googleHome) window.googleHome.log("weather did not load, trying again"); }
+    });
   }
 
   // Open-Meteo (free, no key), the same call the bridge makes. The words come from i18n.js.
@@ -2615,6 +2619,7 @@
     Array.prototype.forEach.call($("people").children, function (el) { el.classList.remove("focus"); });
     if (window.googleHome && zone !== "thermo") window.googleHome.paint(false);
     if (window.googleCams && zone !== "cams") window.googleCams.paint(false);
+    if (window.googleHome && zone !== "photo") window.googleHome.photoPaint(false);
   }
 
   function scrollShelf() {
@@ -2633,6 +2638,7 @@
 
   function shelfOn() { return !$("shelf-section").classList.contains("empty"); }
   function thermoOn() { return !!(window.googleHome && window.googleHome.thermoOn()); }
+  function photoOn() { return !!(window.googleHome && window.googleHome.photoOn()); }
   function camsOn() { return !!(window.googleCams && window.googleCams.any()); }
   // the switcher shows for two or more people, also while nobody has anything yet (issue #23)
   function peopleOn() { return peopleCount() >= 2; }
@@ -2653,6 +2659,12 @@
     if (zone === "menu") { renderMenu(); return; }
     if (zone === "inputs") { if (quickEls[qi]) quickEls[qi].classList.add("focus"); renderInputMenu(); return; }
     if (zone === "pmenu") { renderPop(); $("people").classList.add("focus"); return; }
+    if (zone === "photo") {   // the photo frame (ghome.js)
+      if (!photoOn()) { zone = "grid"; paintFocus(); return; }
+      window.googleHome.photoPaint(true);
+      hero(null);
+      return;
+    }
     if (zone === "cams") {   // the camera row (cameras.js)
       if (!camsOn()) { zone = "grid"; paintFocus(); return; }
       window.googleCams.paint(true);
@@ -2738,7 +2750,18 @@
         if (lastQ >= 0 && quickEls[lastQ]) { zone = "quick"; qi = lastQ; }
         else if (camsOn()) { zone = "cams"; window.googleCams.land("last"); }
         else zone = cards.length ? "shelf" : "grid";
-      } else if (away === "left") { if (peopleOn()) toPeople(); else if (camsOn()) { zone = "cams"; window.googleCams.land("last"); } else zone = cards.length ? "shelf" : "grid"; }
+      } else if (away === "left") { if (photoOn()) zone = "photo"; else if (peopleOn()) toPeople(); else if (camsOn()) { zone = "cams"; window.googleCams.land("last"); } else zone = cards.length ? "shelf" : "grid"; }
+      paintFocus();
+      return;
+    }
+    if (zone === "photo") {
+      var left = window.googleHome.photoMove(dx, dy);
+      if (left === "right") { if (thermoOn()) zone = "thermo"; }
+      else if (left === "down") {
+        if (peopleOn()) toPeople();
+        else if (camsOn()) { zone = "cams"; window.googleCams.land("first"); }
+        else zone = cards.length ? "shelf" : "grid";
+      }
       paintFocus();
       return;
     }
@@ -2748,7 +2771,8 @@
         if (cards.length) zone = "shelf";
         else { zone = "grid"; if (gridEls.length) g = nearestInRow(0, window.googleCams.x()); }
       } else if (gone === "up") {
-        if (thermoOn()) zone = "thermo";
+        if (photoOn() && (window.googleCams.x() < innerWidth / 3 || !thermoOn())) zone = "photo";
+        else if (thermoOn()) zone = "thermo";
         else if (peopleOn()) toPeople();
         else if (hasQuick()) { zone = "quick"; qi = 0; }
       }
@@ -2828,7 +2852,8 @@
       else if (dx && !isHead()) {
         // moving across the names only moves the outline; OK picks (you have to click to select), so passing a name on the way to Sleep timer changes nothing
         pi = Math.max(0, Math.min(PEOPLE.length - 1, pi + dx));
-      } else if (dy > 0 && camsOn()) { zone = "cams"; window.googleCams.land("first"); }
+      } else if (dy < 0 && photoOn()) zone = "photo";
+      else if (dy > 0 && camsOn()) { zone = "cams"; window.googleCams.land("first"); }
       else if (dy > 0) zone = NIGHT && npReach() ? "np" : cards.length ? "shelf" : "grid";
     } else if (zone === "shelf") {
       if (dx < 0 && s === 0 && NIGHT && npReach()) { zone = "np"; npI = Math.max(0, npButtons().length - 1); }
@@ -2944,6 +2969,7 @@
     if (zone === "smart") { closeSmart(); paintFocus(); return; }
     if (zone === "thermo") { if (!window.googleHome.back()) zone = "grid"; paintFocus(); return; }
     if (zone === "cams") { if (!window.googleCams.back()) zone = "grid"; paintFocus(); return; }
+    if (zone === "photo") { if (!window.googleHome.photoBack()) zone = "grid"; paintFocus(); return; }
     if (zone === "gear") { closeGear(); paintFocus(); return; }
     if (zone === "appmenu") { closeAppMenu(); paintFocus(); return; }
     if (zone === "shelfmenu") { closeShelfMenu(); paintFocus(); return; }
@@ -3007,6 +3033,7 @@
     }
     if (zone === "thermo") { window.googleHome.ok(); return; }
     if (zone === "cams") { window.googleCams.ok(); return; }
+    if (zone === "photo") { window.googleHome.photoOk(); return; }
     if (zone === "quick") { quickAction(); return; }
     if (zone === "people") {
       if (isHead()) { openPop(); paintFocus(); return; }
@@ -4678,6 +4705,17 @@
     settingsKey: function () { blip(0, 0); settingsKey(); },
     resume: function () { toggleScreenOff(false); setIdleAmbient(false); resetSmartIdle(); okReset(); refresh(); if (!OFFLINE) refreshQuick(); refreshWeather(); startVideo(); sceneVideos(true); refreshMusic(); if (window.AmbientWeather) window.AmbientWeather.resume(); resetIdlePhoto(); if (window.googleCams) window.googleCams.resume(); if (window.googleHome) window.googleHome.resume(); },
     // an app is in front: the video background stops until the home is back
+    // the doorbell (GoogleBell.kt): whatever is open closes and that camera fills the screen
+    ring: function (key) {
+      if (kidsOn() || !window.googleCams || !window.googleCams.ring) return;
+      toggleScreenOff(false); setIdleAmbient(false);
+      if (["grid", "shelf", "people", "quick", "np", "thermo", "cams", "photo"].indexOf(zone) < 0) kidsCover();
+      if (expanded) { expanded = false; renderGrid(); }
+      if (!window.googleCams.ring(String(key))) return;
+      zone = "cams";
+      resetIdlePhoto(); resetSmartIdle();
+      paintFocus();
+    },
     pause: function () { saveFocusNow(); pauseVideo(); if (window.googleCams) window.googleCams.pause(); if (window.googleHome) window.googleHome.pause(); },
     // the launcher's file picker has copied the chosen photos into its own storage (Home settings)
     photosAdded: function (names) { photosAdded(names); },
