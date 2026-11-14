@@ -54,9 +54,10 @@ jobs:
           fi
 
       - name: Build the TV apps
-        # a fork's builds look for updates in the fork's own releases, never in another signer's
+        # This fork's builds never look for or offer updates on the TV: a new build only ever gets
+        # there by installing it from a computer. One less way in for anyone but the owner.
         env:
-          UPDATE_REPO: ${{ github.repository }}
+          UPDATE_REPO: ""
         run: sh scripts/build-apk.sh
 
       - name: On-TV app unit tests

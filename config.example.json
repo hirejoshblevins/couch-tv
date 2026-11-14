@@ -52,6 +52,10 @@
   },
   "google_home": {
     "enabled": false,
-    "cameras": ["Front door", "Backyard"]
+    "cameras": ["Front door", "Backyard"],
+    "thermostat": false,
+    "greeting": false,
+    "photo_seconds": 60,
+    "stay_awake": false
   }
 }

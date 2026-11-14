@@ -164,6 +164,10 @@ class MainActivity : Activity() {
         resumed = true
         restoreTimeout(resume = true)   // back in front: the normal screen timeout goes back (not for the first moments of a press, see ambientAt)
         hideSystemBars()
+        // Google Home, "stay_awake": the home stays on screen, no screensaver and no sleep, for as
+        // long as it is in front. Off unless config.json asks for it (docs/CONFIG.md).
+        if (GoogleHome.settings(this)?.stayAwake == true) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         // Back within a moment of opening a channel card: the app crashed on the way in (see
         // openWatchNextItem). Open it once more; this time it starts cold.
         channelOpened?.let { (at, i) ->

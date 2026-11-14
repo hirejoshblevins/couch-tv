@@ -628,6 +628,10 @@
     var iov = $("idle-ambient-overlay");
     if (iov) iov.classList.toggle("quiet-hours", isQuietHours(SMART_IDLE.quiet_hours));
     fitDate();
+    if (window.googleHome) {   // the greeting stack (ghome.js) is fed from this clock
+      var gw = WX_SHOW && data.weather && data.weather.temp != null ? { temp: tempText(data.weather.temp), text: wxText(data.weather) } : null;
+      window.googleHome.tick(d, hm, CLOCK24 ? "" : (h < 12 ? t("am") : t("pm")), gw, NOBODY || !PEOPLE.length ? "" : PEOPLE[whoIndex()].name);
+    }
     document.body.classList.toggle("night", h >= 21 || h < 6);
     if (NIGHT) { glassClock(hm); if (SUN_SYNC) applySunSync(); updateAmbientWeather(); }
     if (quickReady) renderQuick();
@@ -2606,6 +2610,7 @@
     shelfEls.concat(gridEls, quickEls).forEach(function (el) { if (el) el.classList.remove("focus"); });
     $("people").classList.remove("focus");
     Array.prototype.forEach.call($("people").children, function (el) { el.classList.remove("focus"); });
+    if (window.googleHome && zone !== "thermo") window.googleHome.paint(false);
   }
 
   function scrollShelf() {
@@ -2623,6 +2628,7 @@
   }
 
   function shelfOn() { return !$("shelf-section").classList.contains("empty"); }
+  function thermoOn() { return !!(window.googleHome && window.googleHome.thermoOn()); }
   // the switcher shows for two or more people, also while nobody has anything yet (issue #23)
   function peopleOn() { return peopleCount() >= 2; }
   function toPeople() { zone = "people"; pi = whoIndex(); }
@@ -2642,6 +2648,12 @@
     if (zone === "menu") { renderMenu(); return; }
     if (zone === "inputs") { if (quickEls[qi]) quickEls[qi].classList.add("focus"); renderInputMenu(); return; }
     if (zone === "pmenu") { renderPop(); $("people").classList.add("focus"); return; }
+    if (zone === "thermo") {   // the thermostat dial (ghome.js)
+      if (!thermoOn()) { zone = "grid"; paintFocus(); return; }
+      window.googleHome.paint(true);
+      hero(null);
+      return;
+    }
     if (zone === "np") {
       if (!npReach()) { zone = shelfEls.length ? "shelf" : "grid"; paintFocus(); return; }
       renderNp();
@@ -2707,6 +2719,13 @@
     if (zone === "updask") { if (dy) { ai = Math.max(0, Math.min(1, ai + dy)); renderAsk(); } return; }
     if (zone === "inputs") { if (dy) { inI = Math.max(0, Math.min(inItems.length - 1, inI + dy)); renderInputMenu(); } return; }
     if (lift) { moveLift(dx, dy); return; }
+    if (zone === "thermo") {
+      var away = window.googleHome.move(dx, dy);
+      if (away === "down") { if (hasQuick()) { zone = "quick"; qi = Math.max(0, quickVisible().length - 1); } else zone = cards.length ? "shelf" : "grid"; }
+      else if (away === "left") { if (peopleOn()) toPeople(); else zone = cards.length ? "shelf" : "grid"; }
+      paintFocus();
+      return;
+    }
     if (zone === "ambient") {
       if (dx < 0) ambI = Math.max(0, ambI - 1);
       else if (dx > 0) ambI = Math.min(3, ambI + 1);
@@ -2765,6 +2784,7 @@
       var nq = quickVisible().length;
       if (dx < 0 && qi === 0) { if (peopleOn()) toPeople(); }
       else if (dx) qi = Math.max(0, Math.min(nq - 1, qi + dx));
+      else if (dy < 0) { if (thermoOn()) zone = "thermo"; }
       else if (dy > 0) {
         if (!NIGHT && npReach()) zone = "np";
         else if (peopleOn()) toPeople();
@@ -2775,7 +2795,7 @@
       return;
     }
     if (zone === "people") {
-      if (dx > 0 && (isHead() || pi === PEOPLE.length - 1)) { if (hasQuick()) { zone = "quick"; qi = 0; } else if (!NIGHT && npReach()) zone = "np"; }
+      if (dx > 0 && (isHead() || pi === PEOPLE.length - 1)) { if (hasQuick()) { zone = "quick"; qi = 0; } else if (!NIGHT && npReach()) zone = "np"; else if (thermoOn()) zone = "thermo"; }
       else if (dx && !isHead()) {
         // moving across the names only moves the outline; OK picks (you have to click to select), so passing a name on the way to Sleep timer changes nothing
         pi = Math.max(0, Math.min(PEOPLE.length - 1, pi + dx));
@@ -2783,7 +2803,7 @@
     } else if (zone === "shelf") {
       if (dx < 0 && s === 0 && NIGHT && npReach()) { zone = "np"; npI = Math.max(0, npButtons().length - 1); }
       else if (dx) s = Math.max(0, Math.min(shelfEls.length - 1, s + dx));
-      else if (dy < 0) { if (peopleOn()) toPeople(); else if (!NIGHT && npReach()) zone = "np"; else if (hasQuick()) { zone = "quick"; qi = 0; } }
+      else if (dy < 0) { if (peopleOn()) toPeople(); else if (!NIGHT && npReach()) zone = "np"; else if (hasQuick()) { zone = "quick"; qi = 0; } else if (thermoOn()) zone = "thermo"; }
       else if (dy > 0 && gridEls.length) {
         // land on the app under the show
         var b = shelfEls[s].getBoundingClientRect();
@@ -2811,6 +2831,7 @@
         }
         else if (peopleOn()) toPeople();
         else if (hasQuick()) zone = "quick";   // offline the sleep and picture buttons are hidden
+        else if (thermoOn()) zone = "thermo";
       } else if (dy < 0) {
         g -= GRID_COLS;
       } else if (row < lastRow) {
@@ -2890,6 +2911,7 @@
     }
     if (zone === "settings") { setBack(); return; }
     if (zone === "smart") { closeSmart(); paintFocus(); return; }
+    if (zone === "thermo") { if (!window.googleHome.back()) zone = "grid"; paintFocus(); return; }
     if (zone === "gear") { closeGear(); paintFocus(); return; }
     if (zone === "appmenu") { closeAppMenu(); paintFocus(); return; }
     if (zone === "shelfmenu") { closeShelfMenu(); paintFocus(); return; }
@@ -2951,6 +2973,7 @@
       paintFocus();
       return;
     }
+    if (zone === "thermo") { window.googleHome.ok(); return; }
     if (zone === "quick") { quickAction(); return; }
     if (zone === "people") {
       if (isHead()) { openPop(); paintFocus(); return; }
@@ -4620,9 +4643,9 @@
     noDream: function () { note(t("no_dream")); },
     // the remote's Settings/gear key, caught by the launcher natively (MainActivity.dispatchKeyEvent)
     settingsKey: function () { blip(0, 0); settingsKey(); },
-    resume: function () { toggleScreenOff(false); setIdleAmbient(false); resetSmartIdle(); okReset(); refresh(); if (!OFFLINE) refreshQuick(); refreshWeather(); startVideo(); sceneVideos(true); refreshMusic(); if (window.AmbientWeather) window.AmbientWeather.resume(); resetIdlePhoto(); if (window.googleCams) window.googleCams.resume(); },
+    resume: function () { toggleScreenOff(false); setIdleAmbient(false); resetSmartIdle(); okReset(); refresh(); if (!OFFLINE) refreshQuick(); refreshWeather(); startVideo(); sceneVideos(true); refreshMusic(); if (window.AmbientWeather) window.AmbientWeather.resume(); resetIdlePhoto(); if (window.googleCams) window.googleCams.resume(); if (window.googleHome) window.googleHome.resume(); },
     // an app is in front: the video background stops until the home is back
-    pause: function () { saveFocusNow(); pauseVideo(); if (window.googleCams) window.googleCams.pause(); },
+    pause: function () { saveFocusNow(); pauseVideo(); if (window.googleCams) window.googleCams.pause(); if (window.googleHome) window.googleHome.pause(); },
     // the launcher's file picker has copied the chosen photos into its own storage (Home settings)
     photosAdded: function (names) { photosAdded(names); },
     // the launcher's updater has news (Updater.kt)
@@ -4722,6 +4745,7 @@
     hello.then(refresh).then(function () { mark("home-painted-live"); updTell(); updAsk(); homeAsk(); });
     resetIdlePhoto();
     if (window.googleCams) window.googleCams.resume();   // Google Home cameras (cameras.js): a preview's pretend launcher is in by now
+    if (window.googleHome) window.googleHome.resume();   // and the dial, the frame and the greeting (ghome.js)
   }
 
   if (MOCK || PREVIEW) {

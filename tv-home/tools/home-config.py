@@ -102,6 +102,20 @@ def google_home():
         out[key] = v
     cams = gh.get("cameras")
     out["cameras"] = [str(c).strip()[:60] for c in cams if str(c).strip()][:4] if isinstance(cams, list) else []
+    out["thermostat"] = gh.get("thermostat") is True
+    out["greeting"] = gh.get("greeting") is True
+    out["stay_awake"] = gh.get("stay_awake") is True
+    secs = gh.get("photo_seconds")
+    out["photo_seconds"] = max(60, min(3600, int(secs))) if isinstance(secs, (int, float)) and not isinstance(secs, bool) else 60
+    # The shared album's link lets anyone who has it see the album, so it lives in .env like a secret.
+    album = (os.environ.get("GOOGLE_PHOTOS_ALBUM_URL") or "").strip()
+    if album:
+        if re.fullmatch(r"https://photos\.app\.goo\.gl/[A-Za-z0-9]{5,40}"
+                        r"|https://photos\.google\.com/share/[A-Za-z0-9_-]{20,200}\?key=[A-Za-z0-9_-]{10,200}", album):
+            out["album"] = album
+        else:
+            print("home-config: GOOGLE_PHOTOS_ALBUM_URL is not a Google Photos shared album link, the photo frame stays off",
+                  file=sys.stderr)
     return out
 
 
@@ -109,7 +123,9 @@ if "--gh" in sys.argv:
     gh = google_home()
     if "--check" in sys.argv:
         if gh:
-            print("Google Home cameras: " + (", ".join(gh["cameras"]) if gh["cameras"] else "every shared camera"))
+            print("Google Home cameras: " + (", ".join(gh["cameras"]) if gh["cameras"] else "every shared camera")
+                  + ("; thermostat" if gh["thermostat"] else "") + ("; photo album" if "album" in gh else "")
+                  + ("; greeting" if gh["greeting"] else "") + ("; stays awake" if gh["stay_awake"] else ""))
         else:
             print("Google Home cameras: off")
     else:

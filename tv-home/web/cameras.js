@@ -38,7 +38,8 @@
   }
   function reply(id, r) {
     var f = waiting[id];
-    if (f) { delete waiting[id]; f(r); }
+    if (f) { delete waiting[id]; f(r); return; }
+    if (window.googleHome) window.googleHome.reply(id, r);   // the dial's and the frame's asks (ghome.js)
   }
 
   // ---------------- one camera ----------------

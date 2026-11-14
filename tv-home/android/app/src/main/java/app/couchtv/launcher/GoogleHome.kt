@@ -15,8 +15,8 @@ import java.net.URLEncoder
 import java.util.concurrent.Executors
 
 /**
- * Google Home cameras on the home, live, through Google's Device Access (Smart Device Management)
- * API. Optional and off unless config.json has a "google_home" section and .env has the four
+ * Google Home on the home: cameras live, the thermostat, and a shared Google Photos album, the
+ * first two through Google's Device Access (Smart Device Management) API. Optional and off unless config.json has a "google_home" section and .env has the four
  * Google values (docs/CONFIG.md, Google Home cameras): apply.sh hands them to the app as the
  * "gh_b64" extra, and the app keeps them in its own private store ("gh"), apart from the page's
  * settings. With no section there is nothing here: no calls, no camera row.
@@ -25,9 +25,12 @@ import java.util.concurrent.Executors
  * asks through window.TVGH (Page below) and only these are allowed, each for the cameras this
  * account shared with the Device Access project and nothing else:
  *   list the cameras (a short key and a name each), start a live stream for one (the page makes
- *   the WebRTC offer, Google answers), keep that stream going, and stop it.
- * Every call goes to Google's two fixed addresses only, never follows a redirect, and gives up
- * after a few seconds. Nothing here is ever logged.
+ *   the WebRTC offer, Google answers), keep that stream going, and stop it;
+ *   read the thermostat, set its temperature (kept inside fixed limits) and its mode;
+ *   list the pictures of the one shared album whose link came with the settings.
+ * Every Device Access call goes to Google's two fixed addresses only and never follows a redirect.
+ * The album is read from Google Photos' own two addresses only. Everything gives up after a few
+ * seconds, and nothing here is ever logged.
  */
 object GoogleHome {
     private const val STORE = "gh"
@@ -38,7 +41,11 @@ object GoogleHome {
     private const val LIVE = "sdm.devices.commands.CameraLiveStream."
     private const val MOST = 4   // cameras on the home at once
 
-    class Settings(val clientId: String, val clientSecret: String, val refreshToken: String, val project: String, val cameras: List<String>)
+    class Settings(
+        val clientId: String, val clientSecret: String, val refreshToken: String, val project: String,
+        val cameras: List<String>, val thermostat: Boolean, val album: String?, val photoSeconds: Int,
+        val stayAwake: Boolean, val greeting: Boolean,
+    )
     private class Cam(val device: String, val name: String)
 
     private val CLIENT_ID = Regex("[0-9A-Za-z._-]{20,200}")
@@ -46,6 +53,7 @@ object GoogleHome {
     private val REFRESH = Regex("[0-9A-Za-z/_.-]{20,2048}")
     private val PROJECT = Regex("[0-9a-f-]{20,64}")
     private val DEVICE = Regex("enterprises/[0-9a-f-]{20,64}/devices/[0-9A-Za-z_-]{10,200}")
+    private val ALBUM = Regex("https://photos\\.app\\.goo\\.gl/[A-Za-z0-9]{5,40}|https://photos\\.google\\.com/share/[A-Za-z0-9_-]{20,200}\\?key=[A-Za-z0-9_-]{10,200}")
 
     @Volatile private var cached: Settings? = null
     @Volatile private var cachedFrom: String? = null
@@ -63,7 +71,7 @@ object GoogleHome {
         if (json == null) e.remove(KEY) else e.putString(KEY, json)
         e.commit()
         cached = null; cachedFrom = null
-        synchronized(lock) { access = null; cams = null }
+        synchronized(lock) { access = null; cams = null; thermo = null; thermoMode = null }
     }
 
     /** The section, checked, or null when Google Home is off. */
@@ -84,7 +92,9 @@ object GoogleHome {
         o.optJSONArray("cameras")?.let { a ->
             for (k in 0 until a.length()) a.optString(k).trim().take(60).takeIf { it.isNotEmpty() }?.let { names.add(it) }
         }
-        return Settings(id, secret, refresh, project, names.take(MOST))
+        val album = o.optString("album").trim().takeIf { ALBUM.matches(it) }
+        return Settings(id, secret, refresh, project, names.take(MOST), o.optBoolean("thermostat", false), album,
+            o.optInt("photo_seconds", 60).coerceIn(60, 3600), o.optBoolean("stay_awake", false), o.optBoolean("greeting", false))
     }
 
     // ---------------------------------------------------------------- talking to Google
@@ -93,6 +103,8 @@ object GoogleHome {
     private var access: String? = null
     private var accessUntil = 0L
     private var cams: List<Cam>? = null
+    private var thermo: String? = null       // the thermostat's device name, once found
+    private var thermoMode: String? = null   // its mode when last read: decides which setpoint command is sent
 
     /** One call to one of Google's two addresses. The status code and the body, or -1 when it failed. */
     private fun call(url: String, bearer: String?, form: String?, json: JSONObject?): Pair<Int, JSONObject?> {
@@ -165,10 +177,13 @@ object GoogleHome {
         if (code != 200 || o == null) return null
         val all = mutableListOf<Cam>()
         val list = o.optJSONArray("devices") ?: JSONArray()
+        var stat: String? = null
         for (k in 0 until list.length()) {
             val d = list.optJSONObject(k) ?: continue
             val device = d.optString("name")
             val traits = d.optJSONObject("traits") ?: continue
+            if (stat == null && d.optString("type") == "sdm.devices.types.THERMOSTAT" && DEVICE.matches(device) &&
+                device.startsWith("enterprises/${s.project}/")) stat = device
             val live = traits.optJSONObject("sdm.devices.traits.CameraLiveStream") ?: continue
             val protocols = live.optJSONArray("supportedProtocols")
             val webrtc = protocols != null && (0 until protocols.length()).any { protocols.optString(it) == "WEB_RTC" }
@@ -179,8 +194,158 @@ object GoogleHome {
         }
         val picked = if (s.cameras.isEmpty()) all else s.cameras.mapNotNull { want -> all.firstOrNull { it.name.equals(want, ignoreCase = true) } }
         val out = picked.distinctBy { it.device }.take(MOST)
-        synchronized(lock) { cams = out }
+        synchronized(lock) { cams = out; thermo = stat }
         return out
+    }
+
+    // ---------------------------------------------------------------- the thermostat
+
+    private const val T_MIN = 10.0   // Celsius: what a Nest takes (50 to 90 Fahrenheit)
+    private const val T_MAX = 32.0
+    private val T_MODES = listOf("HEAT", "COOL", "HEATCOOL", "OFF")
+
+    private fun thermostat(s: Settings): String? {
+        synchronized(lock) { thermo?.let { return it } }
+        cameras(s, true) ?: return null
+        return synchronized(lock) { thermo }
+    }
+
+    private fun num(o: JSONObject?, key: String): Double? =
+        if (o != null && o.has(key) && !o.isNull(key)) o.optDouble(key).takeIf { it.isFinite() } else null
+
+    /** The thermostat as the page draws it. Temperatures are Celsius; "scale" says what to show. */
+    private fun readThermostat(s: Settings): JSONObject {
+        val failed = JSONObject().put("ok", false).put("error", "failed")
+        val device = thermostat(s) ?: return failed
+        val (code, d) = api(s, device, null)
+        val t = d?.optJSONObject("traits")
+        if (code != 200 || t == null) return failed.put("code", code)
+        fun trait(n: String) = t.optJSONObject("sdm.devices.traits.$n")
+        val mode = trait("ThermostatMode")?.optString("mode").orEmpty()
+        val modes = JSONArray()
+        trait("ThermostatMode")?.optJSONArray("availableModes")?.let { a ->
+            for (k in 0 until a.length()) a.optString(k).takeIf { it in T_MODES }?.let { modes.put(it) }
+        }
+        val eco = trait("ThermostatEco")
+        val ecoModes = eco?.optJSONArray("availableModes")
+        val canEco = ecoModes != null && (0 until ecoModes.length()).any { ecoModes.optString(it) == "MANUAL_ECO" }
+        synchronized(lock) { thermoMode = mode.takeIf { it in T_MODES } }
+        val set = trait("ThermostatTemperatureSetpoint")
+        val out = JSONObject().put("ok", true)
+            .put("name", trait("Info")?.optString("customName").orEmpty().take(40))
+            .put("online", trait("Connectivity")?.optString("status") != "OFFLINE")
+            .put("scale", if (trait("Settings")?.optString("temperatureScale") == "FAHRENHEIT") "F" else "C")
+            .put("mode", mode).put("modes", modes)
+            .put("eco", eco?.optString("mode") == "MANUAL_ECO").put("can_eco", canEco)
+            .put("status", trait("ThermostatHvac")?.optString("status").orEmpty())
+            .put("min", T_MIN).put("max", T_MAX)
+        num(trait("Temperature"), "ambientTemperatureCelsius")?.let { out.put("ambient", it) }
+        num(trait("Humidity"), "ambientHumidityPercent")?.let { out.put("humidity", it) }
+        num(set, "heatCelsius")?.let { out.put("heat", it) }
+        num(set, "coolCelsius")?.let { out.put("cool", it) }
+        return out
+    }
+
+    private fun thermoCommand(s: Settings, command: String, params: JSONObject): JSONObject {
+        val device = thermostat(s) ?: return JSONObject().put("ok", false).put("error", "failed")
+        val (code, o) = api(s, "$device:executeCommand",
+            JSONObject().put("command", "sdm.devices.commands.$command").put("params", params))
+        return if (code == 200) JSONObject().put("ok", true)
+        else JSONObject().put("ok", false).put("error", "failed").put("code", code)
+            .put("status", o?.optJSONObject("error")?.optString("status").orEmpty())
+    }
+
+    private fun degrees(v: String): Double? = v.toDoubleOrNull()?.takeIf { it.isFinite() && it in T_MIN..T_MAX }
+
+    /** A new target. One number while heating or cooling, "low:high" in heat and cool. Checked against the mode last read. */
+    private fun setTemperature(s: Settings, value: String): JSONObject {
+        val refused = JSONObject().put("ok", false).put("error", "refused")
+        val set = "ThermostatTemperatureSetpoint."
+        return when (synchronized(lock) { thermoMode }) {
+            "HEAT" -> thermoCommand(s, set + "SetHeat", JSONObject().put("heatCelsius", degrees(value) ?: return refused))
+            "COOL" -> thermoCommand(s, set + "SetCool", JSONObject().put("coolCelsius", degrees(value) ?: return refused))
+            "HEATCOOL" -> {
+                val parts = value.split(":")
+                val low = degrees(parts.getOrNull(0).orEmpty()) ?: return refused
+                val high = degrees(parts.getOrNull(1).orEmpty()) ?: return refused
+                if (parts.size != 2 || high - low < 1.5) return refused
+                thermoCommand(s, set + "SetRange", JSONObject().put("heatCelsius", low).put("coolCelsius", high))
+            }
+            else -> refused   // off, or not read yet
+        }
+    }
+
+    private fun setMode(s: Settings, value: String): JSONObject {
+        if (value == "ECO") return thermoCommand(s, "ThermostatEco.SetMode", JSONObject().put("mode", "MANUAL_ECO"))
+        if (value !in T_MODES) return JSONObject().put("ok", false).put("error", "refused")
+        // leaving eco first: Google refuses a mode change while eco is on. A failure here only means it was off already.
+        thermoCommand(s, "ThermostatEco.SetMode", JSONObject().put("mode", "OFF"))
+        val out = thermoCommand(s, "ThermostatMode.SetMode", JSONObject().put("mode", value))
+        if (out.optBoolean("ok")) synchronized(lock) { thermoMode = value }
+        return out
+    }
+
+    // ---------------------------------------------------------------- the shared photo album
+
+    private val PHOTO_HOSTS = setOf("photos.app.goo.gl", "photos.google.com")
+    private val PICTURE = Regex("\\[\"(https://lh3\\.googleusercontent\\.com/pw/[A-Za-z0-9_-]{20,400})\",(\\d{2,5}),(\\d{2,5})")
+    private const val PHOTOS_MOST = 60
+
+    /**
+     * The shared album's page, as anyone with the link sees it (no sign-in, no cookies). Google has
+     * no API for this, so the picture addresses are read out of the page: when Google changes the
+     * page this returns nothing and the home keeps the pictures it had. Redirects are followed by
+     * hand and only between Google Photos' own two addresses.
+     */
+    private fun albumPage(start: String, agent: String): String? {
+        var at = start
+        for (hop in 0 until 4) {
+            val u = try { URL(at) } catch (e: Exception) { return null }
+            if (u.protocol != "https" || u.host !in PHOTO_HOSTS || u.userInfo != null) return null
+            var c: HttpURLConnection? = null
+            try {
+                c = u.openConnection() as HttpURLConnection
+                c.instanceFollowRedirects = false
+                c.connectTimeout = 6000
+                c.readTimeout = 15000
+                c.setRequestProperty("User-Agent", agent)
+                c.setRequestProperty("Accept-Language", "en")
+                val code = c.responseCode
+                if (code in 300..399) {
+                    at = URL(u, c.getHeaderField("Location") ?: return null).toString()
+                    continue
+                }
+                if (code != 200) return null
+                val out = ByteArrayOutputStream()
+                c.inputStream.use { inp ->
+                    val buf = ByteArray(32 * 1024)
+                    while (true) {
+                        val n = inp.read(buf)
+                        if (n < 0) break
+                        out.write(buf, 0, n)
+                        if (out.size() > 8 * 1024 * 1024) return null
+                    }
+                }
+                return String(out.toByteArray(), Charsets.UTF_8)
+            } catch (e: Exception) {
+                return null
+            } finally {
+                c?.disconnect()
+            }
+        }
+        return null
+    }
+
+    private fun photos(s: Settings, agent: String): JSONObject {
+        val album = s.album ?: return JSONObject().put("ok", false).put("error", "off")
+        val page = albumPage(album, agent) ?: return JSONObject().put("ok", false).put("error", "failed")
+        val seen = LinkedHashSet<String>()
+        for (m in PICTURE.findAll(page)) {
+            if (m.groupValues[2].toInt() < 200 || m.groupValues[3].toInt() < 200) continue   // not a photo: an icon or a face
+            seen.add(m.groupValues[1])
+            if (seen.size >= PHOTOS_MOST) break
+        }
+        return JSONObject().put("ok", true).put("photos", JSONArray(seen.map { "$it=w900-h900" }))
     }
 
     private fun cam(s: Settings, key: String): Cam? {
@@ -192,7 +357,7 @@ object GoogleHome {
 
     private val SESSION = Regex("[\\x21-\\x7E]{8,4096}")
 
-    private fun answer(s: Settings?, action: String, key: String, value: String): JSONObject {
+    private fun answer(s: Settings?, action: String, key: String, value: String, agent: String): JSONObject {
         if (s == null) return JSONObject().put("ok", false).put("error", "off")
         val refused = JSONObject().put("ok", false).put("error", "refused")
         fun failed(code: Int, o: JSONObject?) = JSONObject().put("ok", false).put("error", "failed").put("code", code)
@@ -224,12 +389,17 @@ object GoogleHome {
                 JSONObject().put("ok", true).put("session", r?.optString("mediaSessionId").orEmpty().ifEmpty { value })
                     .put("expires", r?.optString("expiresAt").orEmpty())
             }
+            "thermostat" -> if (s.thermostat) readThermostat(s) else refused
+            "tset" -> if (s.thermostat) setTemperature(s, value) else refused
+            "tmode" -> if (s.thermostat) setMode(s, value) else refused
+            "photos" -> photos(s, agent)
             else -> refused
         }
     }
 
     /**
-     * window.TVGH on the page. on() says whether Google Home is set up; request() does one of the
+     * window.TVGH on the page. on() says whether Google Home is set up and info() which parts (no secret, no
+     * address); request() does one of the
      * allowed things and answers later through googleCams.reply(id, ...), so the page never waits
      * on the network. Only the launcher's own pages may ask: the bridge it found, or its saved copy.
      */
@@ -239,8 +409,17 @@ object GoogleHome {
         private val io = Executors.newFixedThreadPool(3)
         private val ids = Regex("[a-z0-9]{1,16}")
 
+        private val agent: String = try { android.webkit.WebSettings.getDefaultUserAgent(app) } catch (e: Exception) { "Mozilla/5.0" }
+
         @JavascriptInterface
         fun on(): Boolean = settings(app) != null
+
+        @JavascriptInterface
+        fun info(): String {
+            val s = settings(app) ?: return "{}"
+            return JSONObject().put("thermostat", s.thermostat).put("photos", s.album != null)
+                .put("photo_seconds", s.photoSeconds).put("greeting", s.greeting).toString()
+        }
 
         @JavascriptInterface
         fun request(id: String, action: String, key: String, value: String) {
@@ -248,7 +427,7 @@ object GoogleHome {
             main.post {
                 if (!trusted(web.url)) { reply(id, JSONObject().put("ok", false).put("error", "refused")); return@post }
                 io.execute {
-                    val out = try { answer(settings(app), action, key, value) } catch (e: Exception) { JSONObject().put("ok", false) }
+                    val out = try { answer(settings(app), action, key, value, agent) } catch (e: Exception) { JSONObject().put("ok", false) }
                     main.post { reply(id, out) }
                 }
             }

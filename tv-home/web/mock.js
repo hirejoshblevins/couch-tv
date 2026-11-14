@@ -184,12 +184,29 @@
   if (arg("cams")) {
     var camNames = ["Front Porch", "Backyard", "Kitchen camera"].slice(0, Math.max(1, Math.min(4, parseInt(arg("cams"), 10) || 3)));
     if (arg("cams") === "4") camNames = ["Front Porch", "Backyard", "Kitchen camera", "Garage"];
+    // ?gh=1 adds a pretend thermostat (it takes the remote, nothing real changes), two of the
+    // home's own scene pictures as the album, and the greeting.
+    var ghAll = !!arg("gh");
+    var stat = { ok: true, name: "Thermostat", online: true, scale: "F", mode: "HEAT", modes: ["HEAT", "COOL", "HEATCOOL", "OFF"],
+      eco: false, can_eco: true, status: "HEATING", min: 10, max: 32, ambient: 20.4, humidity: 31, heat: 21.11, cool: 24.44 };
     window.TVGH = {
       on: function () { return true; },
-      request: function (id, action) {
-        var r = action === "cameras"
-          ? { ok: true, cameras: camNames.map(function (n, k) { return { key: "c" + k, name: n }; }) }
-          : { ok: false, error: "failed" };
+      info: function () { return JSON.stringify({ thermostat: ghAll, photos: ghAll, greeting: ghAll, photo_seconds: 60 }); },
+      request: function (id, action, key, value) {
+        var r = { ok: false, error: "failed" };
+        if (action === "cameras") r = { ok: true, cameras: camNames.map(function (n, k) { return { key: "c" + k, name: n }; }) };
+        else if (action === "photos") r = { ok: true, photos: ["backgrounds/scene-golden.jpg", "backgrounds/scene-dawn.jpg"] };
+        else if (action === "thermostat") r = stat;
+        else if (action === "tmode") {
+          stat.eco = value === "ECO";
+          if (value !== "ECO") stat.mode = value;
+          stat.status = stat.eco || stat.mode === "OFF" ? "OFF" : stat.mode === "COOL" ? "COOLING" : "HEATING";
+          r = { ok: true };
+        } else if (action === "tset") {
+          var v = String(value).split(":").map(Number);
+          if (stat.mode === "HEAT") stat.heat = v[0]; else if (stat.mode === "COOL") stat.cool = v[0]; else { stat.heat = v[0]; stat.cool = v[1]; }
+          r = { ok: true };
+        }
         setTimeout(function () { if (window.googleCams) window.googleCams.reply(id, r); }, 150);
       }
     };

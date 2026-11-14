@@ -4,8 +4,10 @@
 <data-extraction-rules>
     <cloud-backup>
         <exclude domain="sharedpref" path="ha.xml" />
+        <exclude domain="sharedpref" path="gh.xml" />
     </cloud-backup>
     <device-transfer>
         <exclude domain="sharedpref" path="ha.xml" />
+        <exclude domain="sharedpref" path="gh.xml" />
     </device-transfer>
 </data-extraction-rules>

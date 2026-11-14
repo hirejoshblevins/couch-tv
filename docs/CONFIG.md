@@ -436,6 +436,10 @@ GOOGLE_DEVICE_ACCESS_PROJECT_ID=<the Device Access project id>
 |---|---|
 | `cameras` | Which cameras, and in what order, by the name the Google Home app shows (a camera with no name of its own goes by its room). Up to 4. Left out or empty: every camera you shared. |
 | `enabled` | `false` switches the row off without deleting the section. |
+| `thermostat` [`false`] | `true` draws a round thermostat dial at the top right for the Nest thermostat you shared with the Device Access project. It takes the remote: OK takes hold of it, Up and Down change the temperature (kept between 50 and 90 °F), Left and Right the mode (heat, cool, heat and cool, off, eco), OK or Back lets go. A change is sent once the presses stop. |
+| `greeting` [`false`] | `true` replaces the scenes' own clocks with one stack at the top middle: "Good evening, Name" (whoever is watching), the date, the time, and the temperature and weather. English only. |
+| `photo_seconds` [`60`] | How long each picture of the photo frame stays, 60 to 3600 seconds. The frame is on when `.env` has `GOOGLE_PHOTOS_ALBUM_URL`, the link of a Google Photos shared album: its pictures take turns at the top left and the album is read again every three hours, so adding or removing a picture in the album changes the TV. Google has no API for this: the pictures are read from the album's own page, which can stop working when Google changes that page, and then the frame keeps the pictures it had. |
+| `stay_awake` [`false`] | `true` keeps the home on screen for as long as it is in front: no screensaver and no sleep from being left alone. The TV's power button and the sleep timer still switch it off. Think twice on an OLED, where a picture that never moves can leave a mark. |
 
 **What you need from Google, once:** a Device Access registration (Google charges a one-time US$5),
 a Google Cloud project with the Smart Device Management API switched on and an OAuth client of type
