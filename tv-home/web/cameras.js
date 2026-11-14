@@ -25,6 +25,16 @@
   var showing = !document.hidden;
   var listed = false, listTimer = null, listTries = 0, sleepTimer = null;
 
+  var SIZE_KEY = "tvhome.camsizes", sizes = {};   // each camera's picture size (width times height), by name
+  try { sizes = JSON.parse(localStorage.getItem(SIZE_KEY) || "{}") || {}; } catch (e) { sizes = {}; }
+  function learn(c) {
+    var a = c.video.videoWidth * c.video.videoHeight;
+    var had = sizes[c.name] || 0;
+    if (!a || (had < 1e11 && a <= had)) return;
+    sizes[c.name] = a;
+    try { localStorage.setItem(SIZE_KEY, JSON.stringify(sizes)); } catch (e) {}
+    log("cam " + c.key + " is " + c.video.videoWidth + "x" + c.video.videoHeight);
+  }
   var maxLive = 99;           // how many cameras this TV can play at once, once it is known
   var rotateTimer = null;
   function native() { return window.TVGH || null; }
@@ -126,6 +136,17 @@
     var n = liveCams().length;
     c.blank = (c.blank || 0) + 1;
     log("cam " + c.key + " connected, no picture (" + c.blank + "); " + n + " others playing");
+    liveCams().forEach(learn);
+    // A camera that is not the smallest got no picture while others play: the order was wrong
+    // (its size was not known yet). Start them all again, biggest first. Only once.
+    var smallest = order()[cams.length - 1];
+    if (!reordered && n >= 1 && c !== smallest) {
+      reordered = true;
+      if (!sizes[c.name]) sizes[c.name] = 1e11;   // never seen: taken as big from now on
+      log("starting again, biggest picture first");
+      restartAll();
+      return;
+    }
     // once can be a bad start: try that camera again. Twice in a row, with others playing, is the TV's limit.
     if (c.blank >= 2 && n >= 1 && n < cams.length) {
       maxLive = n;
@@ -202,7 +223,7 @@
       if (!c.pc || c.state !== "live") continue;
       var t = c.video.currentTime;
       if (t === c.last) { c.stalls += 1; if (c.stalls >= 2) again(c); }
-      else { c.stalls = 0; c.last = t; }
+      else { c.stalls = 0; c.last = t; learn(c); }
     }
   }, WATCH_MS);
 
@@ -226,7 +247,7 @@
       canvas.setAttribute("aria-hidden", "true");
       el.appendChild(canvas); el.appendChild(video); el.appendChild(name);
       row.appendChild(el);
-      var c = { key: String(list[k].key), el: el, video: video, pc: null, session: null, renew: null, retry: null, tries: 0, state: "wait", last: -1, stalls: 0, limited: false, focus: false, big: false,
+      var c = { n: k, name: String(list[k].name || list[k].key), key: String(list[k].key), el: el, video: video, pc: null, session: null, renew: null, retry: null, tries: 0, state: "wait", last: -1, stalls: 0, limited: false, focus: false, big: false,
         canvas: canvas, parked: false, parkedAt: 0, since: 0, noPic: null };
       mark(c, "wait");
       (function (cam) {
@@ -234,7 +255,8 @@
           if (!cam.pc) return;
           clearTimeout(cam.noPic); cam.noPic = null;
           cam.tries = 0; cam.blank = 0; cam.since = Date.now();
-          if (cam.state !== "live") log("cam " + cam.key + " playing " + cam.video.videoWidth + "x" + cam.video.videoHeight);
+          if (cam.state !== "live") log("cam " + cam.key + " playing");
+          learn(cam);
           mark(cam, "live");
         });
       })(c);
@@ -244,16 +266,42 @@
     row.setAttribute("data-n", String(cams.length));
   }
 
-  // Start every camera that is not already up, one after another.
+  // Start every camera that is not already up, one at a time, the biggest picture first. A TV has
+  // only a few fast (hardware) video decoders, often two; the next stream gets a slow one that
+  // manages a small picture and not a big one. So each camera waits for the one before it to
+  // show a picture, and the smallest goes last. Sizes are learned as the cameras play.
+  var seqTimer = null, reordered = false;
+  function order() {
+    return cams.slice().sort(function (a, b) { return (sizes[b.name] || 1e12) - (sizes[a.name] || 1e12) || a.n - b.n; });
+  }
   function startAll() {
-    var n = 0, going = cams.filter(function (x) { return x.pc; }).length;
-    for (var k = 0; k < cams.length; k++) {
-      if (cams[k].pc) continue;
-      if (going >= maxLive) { if (!cams[k].parked) { cams[k].parked = true; cams[k].parkedAt = Date.now() - k; mark(cams[k]); } continue; }
-      cams[k].parked = false; going += 1;
-      (function (c, at) { clearTimeout(c.retry); c.retry = setTimeout(function () { start(c); }, at * STAGGER_MS); })(cams[k], n);
-      n += 1;
-    }
+    clearTimeout(seqTimer);
+    var list = order(), i = 0;
+    (function next() {
+      if (!showing) return;
+      while (i < list.length && list[i].pc) i += 1;
+      if (i >= list.length) return;
+      var c = list[i]; i += 1;
+      if (cams.filter(function (x) { return x.pc; }).length >= maxLive) {
+        if (!c.parked) { c.parked = true; c.parkedAt = Date.now() - (cams.length - i); mark(c); }
+        return next();
+      }
+      c.parked = false;
+      clearTimeout(c.retry); c.retry = null;
+      start(c);
+      var waited = 0;
+      seqTimer = setTimeout(function poll() {
+        waited += 500;
+        if (c.state === "live" || !c.pc || waited >= 9000) next();
+        else seqTimer = setTimeout(poll, 500);
+      }, 500);
+    })();
+  }
+  // Every stream stopped and started again in the right order (once: when a big picture got the slow decoder).
+  function restartAll() {
+    clearTimeout(seqTimer);
+    for (var k = 0; k < cams.length; k++) { cams[k].parked = false; stop(cams[k]); }
+    seqTimer = setTimeout(startAll, 1500);
   }
 
   var listing = false;
@@ -285,7 +333,7 @@
     if (!listed) return list();
     if (was) return;
     // back from an app with every stream stopped: find out afresh how many this TV plays at once
-    if (!cams.some(function (x) { return x.pc; })) { maxLive = 99; for (var j = 0; j < cams.length; j++) { cams[j].parked = false; cams[j].blank = 0; mark(cams[j]); } }
+    if (!cams.some(function (x) { return x.pc; })) { maxLive = 99; reordered = false; for (var j = 0; j < cams.length; j++) { cams[j].parked = false; cams[j].blank = 0; mark(cams[j]); } }
     for (var k = 0; k < cams.length; k++) cams[k].tries = 0;
     startAll();
     rotateSoon();
@@ -296,6 +344,7 @@
     showing = false;
     clearTimeout(listTimer);
     clearTimeout(rotateTimer);
+    clearTimeout(seqTimer);
     for (var k = 0; k < cams.length; k++) { clearTimeout(cams[k].retry); cams[k].retry = null; }
     clearTimeout(sleepTimer);
     sleepTimer = setTimeout(function () {

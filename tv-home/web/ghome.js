@@ -11,7 +11,8 @@
   "use strict";
   var ANSWER_MS = 20000;
   var READ_MS = 60000;          // how often the thermostat is read while the home shows
-  var SEND_MS = 1200;           // a change is sent once the presses stop: Google counts requests
+  var SEND_MS = 2000;           // a change is sent once the presses stop: Google counts requests
+  var HELD_MS = 25000;          // Google said "too many": the change is kept and sent again after this
   var SETTLE_MS = 4000;         // then read again, once the thermostat has taken it
   var ALBUM_MS = 3 * 3600000;   // how often the album is read again
 
@@ -166,6 +167,7 @@
   // ======================= the thermostat dial =======================
   var T = null;            // what the thermostat last said
   var focused = false, held = false, readTimer = null, sendTimer = null, busy = false;
+  var misses = 0, heldTimer = null, heldTries = 0;
   var want = null;         // a temperature picked on the dial and not yet confirmed by the thermostat, in shown degrees
   var wantMode = null;     // the same for the mode
   var note = "";
@@ -252,13 +254,17 @@
     if (!info().thermostat || !showing) return;
     if (busy || sendTimer) { readTimer = setTimeout(read, 2000); return; }   // never over a change on its way
     ask("thermostat").then(function (r) {
-      if (!sendTimer && !busy) {
-        T = r && r.ok ? r : { ok: false, scale: T ? T.scale : "F" };
-        want = null; wantMode = null;
-        if (T.ok) note = "";
+      var good = !!(r && r.ok);
+      if (!sendTimer && !busy && !heldTimer) {
+        if (good) { T = r; misses = 0; want = null; wantMode = null; note = ""; }
+        else {
+          misses += 1;
+          // one missed answer keeps what the dial last showed; only several in a row say so
+          if (!T || misses >= 4) T = { ok: false, scale: T ? T.scale : "F" };
+        }
         drawDial();
       }
-      readTimer = setTimeout(read, READ_MS);
+      readTimer = setTimeout(read, good ? READ_MS : misses <= 3 ? 8000 : 30000);
     });
   }
 
@@ -284,16 +290,26 @@
     chain.then(function (r) {
       busy = false;
       if (sendTimer) return;   // more presses came meanwhile: they are sent next
+      if (r && !r.ok && r.code === 429 && heldTries < 4) {
+        // Google counts requests by the minute: the change stays on the dial and goes again shortly
+        heldTries += 1;
+        note = "Sending shortly";
+        drawDial();
+        clearTimeout(heldTimer);
+        heldTimer = setTimeout(function () { heldTimer = null; if (want || wantMode) send(); }, HELD_MS);
+        return;
+      }
+      heldTries = 0;
       if (!r || !r.ok) {
-        note = r && r.code === 429 ? "Too many changes, wait a minute" : "The thermostat did not take that";
+        note = "The thermostat did not take that";
         want = null; wantMode = null;
         drawDial();
-      }
+      } else note = "";
       clearTimeout(readTimer);
       readTimer = setTimeout(read, r && r.ok ? SETTLE_MS : 1500);
     });
   }
-  function sendSoon() { clearTimeout(sendTimer); sendTimer = setTimeout(send, SEND_MS); }
+  function sendSoon() { clearTimeout(heldTimer); heldTimer = null; clearTimeout(sendTimer); sendTimer = setTimeout(send, SEND_MS); }
 
   function nudge(dir) {
     var m = modeNow(), tg = target();
