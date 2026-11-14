@@ -309,7 +309,7 @@
   function resetIdlePhoto() {
     // Google Home's rest mode (ghome.js) counts from the same presses
     if (window.googleHome) window.googleHome.active(!kidsOn() && !screenOffActive && !expanded && !lift &&
-      ["grid", "shelf", "people", "quick", "np", "thermo"].indexOf(zone) >= 0);
+      ["grid", "shelf", "people", "quick", "np", "thermo", "cams"].indexOf(zone) >= 0);
     clearTimeout(idlePhotoTimer);
     idlePhotoTimer = null;
     idlePhotoActive = false;
@@ -2614,6 +2614,7 @@
     $("people").classList.remove("focus");
     Array.prototype.forEach.call($("people").children, function (el) { el.classList.remove("focus"); });
     if (window.googleHome && zone !== "thermo") window.googleHome.paint(false);
+    if (window.googleCams && zone !== "cams") window.googleCams.paint(false);
   }
 
   function scrollShelf() {
@@ -2632,6 +2633,7 @@
 
   function shelfOn() { return !$("shelf-section").classList.contains("empty"); }
   function thermoOn() { return !!(window.googleHome && window.googleHome.thermoOn()); }
+  function camsOn() { return !!(window.googleCams && window.googleCams.any()); }
   // the switcher shows for two or more people, also while nobody has anything yet (issue #23)
   function peopleOn() { return peopleCount() >= 2; }
   function toPeople() { zone = "people"; pi = whoIndex(); }
@@ -2651,6 +2653,12 @@
     if (zone === "menu") { renderMenu(); return; }
     if (zone === "inputs") { if (quickEls[qi]) quickEls[qi].classList.add("focus"); renderInputMenu(); return; }
     if (zone === "pmenu") { renderPop(); $("people").classList.add("focus"); return; }
+    if (zone === "cams") {   // the camera row (cameras.js)
+      if (!camsOn()) { zone = "grid"; paintFocus(); return; }
+      window.googleCams.paint(true);
+      hero(null);
+      return;
+    }
     if (zone === "thermo") {   // the thermostat dial (ghome.js)
       if (!thermoOn()) { zone = "grid"; paintFocus(); return; }
       window.googleHome.paint(true);
@@ -2722,10 +2730,28 @@
     if (zone === "updask") { if (dy) { ai = Math.max(0, Math.min(1, ai + dy)); renderAsk(); } return; }
     if (zone === "inputs") { if (dy) { inI = Math.max(0, Math.min(inItems.length - 1, inI + dy)); renderInputMenu(); } return; }
     if (lift) { moveLift(dx, dy); return; }
+    var cards = NIGHT && expanded ? [] : shelfEls;   // the Keep watching cards the focus can reach
     if (zone === "thermo") {
       var away = window.googleHome.move(dx, dy);
-      if (away === "down") { if (hasQuick()) { zone = "quick"; qi = Math.max(0, quickVisible().length - 1); } else zone = cards.length ? "shelf" : "grid"; }
-      else if (away === "left") { if (peopleOn()) toPeople(); else zone = cards.length ? "shelf" : "grid"; }
+      if (away === "down") {
+        var lastQ = quickVisible().length - 1;
+        if (lastQ >= 0 && quickEls[lastQ]) { zone = "quick"; qi = lastQ; }
+        else if (camsOn()) { zone = "cams"; window.googleCams.land("last"); }
+        else zone = cards.length ? "shelf" : "grid";
+      } else if (away === "left") { if (peopleOn()) toPeople(); else if (camsOn()) { zone = "cams"; window.googleCams.land("last"); } else zone = cards.length ? "shelf" : "grid"; }
+      paintFocus();
+      return;
+    }
+    if (zone === "cams") {
+      var gone = window.googleCams.move(dx, dy);
+      if (gone === "down") {
+        if (cards.length) zone = "shelf";
+        else { zone = "grid"; if (gridEls.length) g = nearestInRow(0, window.googleCams.x()); }
+      } else if (gone === "up") {
+        if (thermoOn()) zone = "thermo";
+        else if (peopleOn()) toPeople();
+        else if (hasQuick()) { zone = "quick"; qi = 0; }
+      }
       paintFocus();
       return;
     }
@@ -2744,7 +2770,6 @@
       return;
     }
     // Night with More apps open: the cards step aside, so up and down skip them
-    var cards = NIGHT && expanded ? [] : shelfEls;
     if (zone === "menu") {
       if (dx || dy) menuI = Math.max(0, Math.min(SLEEP_CHOICES.length - 1, menuI + (dy || dx)));
       paintFocus();
@@ -2788,6 +2813,7 @@
       if (dx < 0 && qi === 0) { if (peopleOn()) toPeople(); }
       else if (dx) qi = Math.max(0, Math.min(nq - 1, qi + dx));
       else if (dy < 0) { if (thermoOn()) zone = "thermo"; }
+      else if (dy > 0 && camsOn()) { zone = "cams"; window.googleCams.land("last"); }
       else if (dy > 0) {
         if (!NIGHT && npReach()) zone = "np";
         else if (peopleOn()) toPeople();
@@ -2802,11 +2828,12 @@
       else if (dx && !isHead()) {
         // moving across the names only moves the outline; OK picks (you have to click to select), so passing a name on the way to Sleep timer changes nothing
         pi = Math.max(0, Math.min(PEOPLE.length - 1, pi + dx));
-      } else if (dy > 0) zone = NIGHT && npReach() ? "np" : cards.length ? "shelf" : "grid";
+      } else if (dy > 0 && camsOn()) { zone = "cams"; window.googleCams.land("first"); }
+      else if (dy > 0) zone = NIGHT && npReach() ? "np" : cards.length ? "shelf" : "grid";
     } else if (zone === "shelf") {
       if (dx < 0 && s === 0 && NIGHT && npReach()) { zone = "np"; npI = Math.max(0, npButtons().length - 1); }
       else if (dx) s = Math.max(0, Math.min(shelfEls.length - 1, s + dx));
-      else if (dy < 0) { if (peopleOn()) toPeople(); else if (!NIGHT && npReach()) zone = "np"; else if (hasQuick()) { zone = "quick"; qi = 0; } else if (thermoOn()) zone = "thermo"; }
+      else if (dy < 0) { if (camsOn()) { zone = "cams"; window.googleCams.land(shelfEls[s] ? shelfEls[s].getBoundingClientRect().left + shelfEls[s].getBoundingClientRect().width / 2 : null); } else if (peopleOn()) toPeople(); else if (!NIGHT && npReach()) zone = "np"; else if (hasQuick()) { zone = "quick"; qi = 0; } else if (thermoOn()) zone = "thermo"; }
       else if (dy > 0 && gridEls.length) {
         // land on the app under the show
         var b = shelfEls[s].getBoundingClientRect();
@@ -2820,6 +2847,7 @@
         if (nx >= 0 && nx < gridEls.length && Math.floor(nx / GRID_COLS) === row) g = nx;
       } else if (dy < 0 && row === 0) {
         if (cards.length) zone = "shelf";
+        else if (camsOn()) { var gb = gridEls[g] ? gridEls[g].getBoundingClientRect() : null; zone = "cams"; window.googleCams.land(gb ? gb.left + gb.width / 2 : null); }
         else if (npReach()) {
           if (AMBIENT_MUSIC && music) {
             ambientOpen = true;
@@ -2915,6 +2943,7 @@
     if (zone === "settings") { setBack(); return; }
     if (zone === "smart") { closeSmart(); paintFocus(); return; }
     if (zone === "thermo") { if (!window.googleHome.back()) zone = "grid"; paintFocus(); return; }
+    if (zone === "cams") { if (!window.googleCams.back()) zone = "grid"; paintFocus(); return; }
     if (zone === "gear") { closeGear(); paintFocus(); return; }
     if (zone === "appmenu") { closeAppMenu(); paintFocus(); return; }
     if (zone === "shelfmenu") { closeShelfMenu(); paintFocus(); return; }
@@ -2977,6 +3006,7 @@
       return;
     }
     if (zone === "thermo") { window.googleHome.ok(); return; }
+    if (zone === "cams") { window.googleCams.ok(); return; }
     if (zone === "quick") { quickAction(); return; }
     if (zone === "people") {
       if (isHead()) { openPop(); paintFocus(); return; }

@@ -108,6 +108,8 @@
       turnTimer = setTimeout(function () { readAlbum(); showNext(); }, 15000);
     };
     if (photos.length === 1 && at === 0) { turnTimer = setTimeout(showNext, info().photo_seconds * 1000); return; }
+    // a picture this <img> already holds raises no new "load": it is ready as it is
+    if (back.getAttribute("src") === photos[next] && back.complete && back.naturalWidth) { back.onload(); return; }
     back.src = photos[next];
   }
 
@@ -327,6 +329,7 @@
       restTimer = null;
       if (document.hidden) return;
       restOn = true;
+      if (window.googleCams) window.googleCams.small();   // a camera opened over the whole screen closes
       if (held) { held = false; drawDial(); }
       root.classList.add("gh-rest");
     }, window.MOCK_REST_MS || info().rest_minutes * 60000);

@@ -30,7 +30,8 @@ import java.util.concurrent.Executors
  *   list the pictures of the one shared album whose link came with the settings.
  * Every Device Access call goes to Google's two fixed addresses only and never follows a redirect.
  * The album is read from Google Photos' own two addresses only. Everything gives up after a few
- * seconds, and nothing here is ever logged.
+ * seconds. The log gets counts and status codes only (how many cameras, how many pictures, what
+ * Google answered), never a secret, an address or a device id.
  */
 object GoogleHome {
     private const val STORE = "gh"
@@ -146,6 +147,8 @@ object GoogleHome {
 
     private fun enc(v: String) = URLEncoder.encode(v, "UTF-8")
 
+    private fun note(what: String) { try { android.util.Log.i("couch-tv", "google home: $what") } catch (e: Exception) {} }
+
     /** A fresh access token, from the refresh token. Null when Google refused or did not answer. */
     private fun token(s: Settings, force: Boolean = false): String? {
         synchronized(lock) {
@@ -156,6 +159,7 @@ object GoogleHome {
                 "&refresh_token=${enc(s.refreshToken)}&grant_type=refresh_token"
             val (code, o) = call(TOKEN_URL, null, form, null)
             val t = o?.optString("access_token")?.takeIf { code == 200 && it.isNotEmpty() }
+            if (t == null) note("sign-in: Google answered $code ${o?.optString("error").orEmpty()}")
             access = t
             accessUntil = now + ((o?.optLong("expires_in", 0L) ?: 0L) - 120).coerceAtLeast(60) * 1000
             return t
@@ -175,7 +179,7 @@ object GoogleHome {
     private fun cameras(s: Settings, refresh: Boolean): List<Cam>? {
         synchronized(lock) { cams?.takeIf { !refresh }?.let { return it } }
         val (code, o) = api(s, "enterprises/${s.project}/devices", null)
-        if (code != 200 || o == null) return null
+        if (code != 200 || o == null) { note("devices: Google answered $code"); return null }
         val all = mutableListOf<Cam>()
         val list = o.optJSONArray("devices") ?: JSONArray()
         var stat: String? = null
@@ -196,6 +200,7 @@ object GoogleHome {
         val picked = if (s.cameras.isEmpty()) all else s.cameras.mapNotNull { want -> all.firstOrNull { it.name.equals(want, ignoreCase = true) } }
         val out = picked.distinctBy { it.device }.take(MOST)
         synchronized(lock) { cams = out; thermo = stat }
+        note("devices: ${all.size} cameras that stream, showing ${out.size}, thermostat ${if (stat != null) "found" else "none"}")
         return out
     }
 
@@ -339,13 +344,14 @@ object GoogleHome {
 
     private fun photos(s: Settings, agent: String): JSONObject {
         val album = s.album ?: return JSONObject().put("ok", false).put("error", "off")
-        val page = albumPage(album, agent) ?: return JSONObject().put("ok", false).put("error", "failed")
+        val page = albumPage(album, agent) ?: run { note("album: the page did not load"); return JSONObject().put("ok", false).put("error", "failed") }
         val seen = LinkedHashSet<String>()
         for (m in PICTURE.findAll(page)) {
             if (m.groupValues[2].toInt() < 200 || m.groupValues[3].toInt() < 200) continue   // not a photo: an icon or a face
             seen.add(m.groupValues[1])
             if (seen.size >= PHOTOS_MOST) break
         }
+        note("album: ${seen.size} pictures (page of ${page.length} characters)")
         return JSONObject().put("ok", true).put("photos", JSONArray(seen.map { "$it=w900-h900" }))
     }
 
@@ -375,7 +381,8 @@ object GoogleHome {
                 val (code, o) = api(s, c.device + ":executeCommand",
                     JSONObject().put("command", LIVE + "GenerateWebRtcStream").put("params", JSONObject().put("offerSdp", value)))
                 val r = o?.optJSONObject("results")
-                if (code != 200 || r == null || r.optString("answerSdp").isEmpty()) return failed(code, o)
+                if (code != 200 || r == null || r.optString("answerSdp").isEmpty()) { note("stream $key: Google answered $code ${o?.optJSONObject("error")?.optString("status").orEmpty()}"); return failed(code, o) }
+                note("stream $key: started")
                 JSONObject().put("ok", true).put("answer", r.optString("answerSdp"))
                     .put("session", r.optString("mediaSessionId")).put("expires", r.optString("expiresAt"))
             }
@@ -385,7 +392,7 @@ object GoogleHome {
                 val (code, o) = api(s, c.device + ":executeCommand",
                     JSONObject().put("command", LIVE + (if (action == "extend") "ExtendWebRtcStream" else "StopWebRtcStream"))
                         .put("params", JSONObject().put("mediaSessionId", value)))
-                if (code != 200) return failed(code, o)
+                if (code != 200) { note("stream $key $action: Google answered $code"); return failed(code, o) }
                 val r = o?.optJSONObject("results")
                 JSONObject().put("ok", true).put("session", r?.optString("mediaSessionId").orEmpty().ifEmpty { value })
                     .put("expires", r?.optString("expiresAt").orEmpty())
@@ -410,7 +417,9 @@ object GoogleHome {
         private val io = Executors.newFixedThreadPool(3)
         private val ids = Regex("[a-z0-9]{1,16}")
 
-        private val agent: String = try { android.webkit.WebSettings.getDefaultUserAgent(app) } catch (e: Exception) { "Mozilla/5.0" }
+        // The album's page as a computer's browser gets it: the TV's own page is cut down and lists
+        // fewer pictures. Like "Request desktop site".
+        private val agent = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
 
         @JavascriptInterface
         fun on(): Boolean = settings(app) != null

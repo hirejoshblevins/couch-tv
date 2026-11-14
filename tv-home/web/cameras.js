@@ -3,8 +3,9 @@
 // page makes each WebRTC offer and plays the video; the launcher (window.TVGH) carries the offer
 // to Google and brings the answer back, so no Google secret or device id ever reaches this page.
 // A stream is asked for only while the home is showing, renewed before Google's five minutes run
-// out, and stopped when an app comes to the front. Nothing here takes the remote: the row is a
-// picture, not a control. Plain ES5 like the rest of the home.
+// out, and stopped when an app comes to the front. The row takes the remote: Left and Right move
+// along the cameras, OK opens the one in focus over the whole screen (Left and Right then change
+// camera, OK or Back closes it). Plain ES5 like the rest of the home.
 (function () {
   "use strict";
   var ANSWER_MS = 20000;      // how long the launcher gets to answer
@@ -44,8 +45,8 @@
 
   // ---------------- one camera ----------------
   function mark(c, state) {
-    c.state = state;
-    c.el.className = "cam" + (state === "live" ? " live" : "");
+    if (state) c.state = state;
+    c.el.className = "cam" + (c.state === "live" ? " live" : "") + (c.focus ? " focus" : "") + (c.big ? " big" : "");
   }
 
   // Google wants the offer whole: wait for the candidates, but never for long.
@@ -164,7 +165,7 @@
       name.appendChild(document.createTextNode(String(list[k].name || "")));
       el.appendChild(video); el.appendChild(name);
       row.appendChild(el);
-      var c = { key: String(list[k].key), el: el, video: video, pc: null, session: null, renew: null, retry: null, tries: 0, state: "wait", last: -1, stalls: 0, limited: false };
+      var c = { key: String(list[k].key), el: el, video: video, pc: null, session: null, renew: null, retry: null, tries: 0, state: "wait", last: -1, stalls: 0, limited: false, focus: false, big: false };
       mark(c, "wait");
       (function (cam) {
         cam.video.addEventListener("playing", function () { if (cam.pc) { cam.tries = 0; mark(cam, "live"); } });
@@ -232,7 +233,45 @@
 
   document.addEventListener("visibilitychange", function () { if (document.hidden) pause(); else resume(); });
 
-  window.googleCams = { reply: reply, pause: pause, resume: resume, on: on };
+  // ---------------- the remote on the row (app.js asks, zone "cams") ----------------
+  var at = 0, focused = false, big = false;
+  function draw() {
+    for (var k = 0; k < cams.length; k++) { cams[k].focus = focused && k === at; cams[k].big = big && k === at; mark(cams[k]); }
+    document.documentElement.classList.toggle("cam-big", big);
+  }
+  function any() { return cams.length > 0; }
+  function middle(k) { var b = cams[k].el.getBoundingClientRect(); return b.left + b.width / 2; }
+  // Land on the camera nearest to x (the app or button the focus came from), or "first" / "last".
+  function land(where) {
+    if (!cams.length) return;
+    if (where === "first") at = 0;
+    else if (where === "last") at = cams.length - 1;
+    else if (typeof where === "number") {
+      var best = 0, far = Infinity;
+      for (var k = 0; k < cams.length; k++) { var d = Math.abs(middle(k) - where); if (d < far) { far = d; best = k; } }
+      at = best;
+    }
+    at = Math.max(0, Math.min(cams.length - 1, at));
+  }
+  function paint(yes) {
+    if (!yes && !focused && !big) return;
+    focused = !!yes;
+    if (!yes) big = false;
+    draw();
+  }
+  // Returns "up" or "down" when the press leaves the row, else nothing.
+  function move(dx, dy) {
+    if (dx) { at = Math.max(0, Math.min(cams.length - 1, at + dx)); draw(); return null; }
+    if (big) return null;
+    return dy < 0 ? "up" : "down";
+  }
+  function ok() { if (cams[at]) { big = !big; draw(); } }
+  function back() { if (!big) return false; big = false; draw(); return true; }
+  function small() { if (big) { big = false; draw(); } }
+  function x() { return cams[at] ? middle(at) : innerWidth / 2; }
+
+  window.googleCams = { reply: reply, pause: pause, resume: resume, on: on,
+    any: any, land: land, paint: paint, move: move, ok: ok, back: back, small: small, x: x };
 
   resume();
 })();
