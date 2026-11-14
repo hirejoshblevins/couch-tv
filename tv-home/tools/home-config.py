@@ -107,6 +107,8 @@ def google_home():
     out["stay_awake"] = gh.get("stay_awake") is True
     secs = gh.get("photo_seconds")
     out["photo_seconds"] = max(60, min(3600, int(secs))) if isinstance(secs, (int, float)) and not isinstance(secs, bool) else 60
+    rest = gh.get("rest_minutes")
+    out["rest_minutes"] = max(0, min(60, int(rest))) if isinstance(rest, (int, float)) and not isinstance(rest, bool) else 10
     # The shared album's link lets anyone who has it see the album, so it lives in .env like a secret.
     album = (os.environ.get("GOOGLE_PHOTOS_ALBUM_URL") or "").strip()
     if album:

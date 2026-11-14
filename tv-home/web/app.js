@@ -307,6 +307,9 @@
       ["grid", "shelf", "people", "quick", "np"].indexOf(zone) >= 0;
   }
   function resetIdlePhoto() {
+    // Google Home's rest mode (ghome.js) counts from the same presses
+    if (window.googleHome) window.googleHome.active(!kidsOn() && !screenOffActive && !expanded && !lift &&
+      ["grid", "shelf", "people", "quick", "np", "thermo"].indexOf(zone) >= 0);
     clearTimeout(idlePhotoTimer);
     idlePhotoTimer = null;
     idlePhotoActive = false;
@@ -321,7 +324,7 @@
   }
   function idlePhotoInput(e) {
     // a dialog or screen that came forward while the rows were hidden gets its key straight away
-    var wakeOnly = idlePhotoActive && idlePhotoAllowed();
+    var wakeOnly = (idlePhotoActive && idlePhotoAllowed()) || !!(window.googleHome && window.googleHome.resting());
     resetIdlePhoto();
     if (wakeOnly && e) {
       e.preventDefault();
@@ -4745,7 +4748,7 @@
     hello.then(refresh).then(function () { mark("home-painted-live"); updTell(); updAsk(); homeAsk(); });
     resetIdlePhoto();
     if (window.googleCams) window.googleCams.resume();   // Google Home cameras (cameras.js): a preview's pretend launcher is in by now
-    if (window.googleHome) window.googleHome.resume();   // and the dial, the frame and the greeting (ghome.js)
+    if (window.googleHome) { window.googleHome.resume(); resetIdlePhoto(); }   // and the dial, the frame and the greeting (ghome.js)
   }
 
   if (MOCK || PREVIEW) {

@@ -25,8 +25,10 @@
     if (INFO) return INFO;
     var o = {};
     try { o = JSON.parse(native().info() || "{}") || {}; } catch (e) { o = {}; }
+    var rest = parseInt(o.rest_minutes, 10);
     INFO = { thermostat: o.thermostat === true, photos: o.photos === true, greeting: o.greeting === true,
-      photo_seconds: Math.max(60, Math.min(3600, parseInt(o.photo_seconds, 10) || 60)) };
+      photo_seconds: Math.max(60, Math.min(3600, parseInt(o.photo_seconds, 10) || 60)),
+      rest_minutes: isNaN(rest) ? 10 : Math.max(0, Math.min(60, rest)) };
     return INFO;
   }
 
@@ -310,6 +312,27 @@
     return true;
   }
 
+  // ======================= rest mode =======================
+  // A home that never changes marks an OLED. After rest_minutes without a press the dock, the dial
+  // and the labels go, the picture dims, and the clock, the cameras and the photo drift slowly so
+  // nothing stays on the same pixels (app.css, html.gh-rest). The first press only brings it all back.
+  var restTimer = null, restOn = false;
+  // app.js calls this on every press and whenever the home comes back; ok says the home itself
+  // (not a menu or Settings) has the remote.
+  function active(ok) {
+    clearTimeout(restTimer); restTimer = null;
+    if (restOn) { restOn = false; root.classList.remove("gh-rest"); }
+    if (!started || !ok || !info().rest_minutes || window.MOCK_NO_REST) return;
+    restTimer = setTimeout(function () {
+      restTimer = null;
+      if (document.hidden) return;
+      restOn = true;
+      if (held) { held = false; drawDial(); }
+      root.classList.add("gh-rest");
+    }, window.MOCK_REST_MS || info().rest_minutes * 60000);
+  }
+  function resting() { return restOn; }
+
   // ======================= starting, pausing =======================
   var started = false;
   function resume() {
@@ -333,10 +356,12 @@
     clearTimeout(readTimer);
     clearTimeout(turnTimer); turnTimer = null;
     if (held) { held = false; drawDial(); }
+    clearTimeout(restTimer); restTimer = null;
+    if (restOn) { restOn = false; root.classList.remove("gh-rest"); }
   }
   document.addEventListener("visibilitychange", function () { if (document.hidden) pause(); else resume(); });
 
   window.googleHome = { reply: reply, tick: tick, resume: resume, pause: pause,
-    thermoOn: thermoOn, paint: paint, move: move, ok: ok, back: back };
+    thermoOn: thermoOn, paint: paint, move: move, ok: ok, back: back, active: active, resting: resting };
   resume();
 })();

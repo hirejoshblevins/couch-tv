@@ -694,6 +694,20 @@ html.ambient-active .ghphoto, html.ambient-active .ghstack, html.ambient-active 
 .ghdial.held { box-shadow: 0 0 0 0.3125rem #fff, 0 0 0 0.9rem rgba(255, 255, 255, 0.28), 0 1.5rem 3.5rem rgba(0, 0, 0, 0.5); transform: scale(1.08); }
 html.has-ghdial .quick { margin-top: 21.5rem; }
 html.has-ghdial.has-ghstack .clock .np { display: none; }
+/* rest mode (ghome.js): what never moves goes, the rest dims and drifts. For OLEDs. */
+html.gh-rest .top-left, html.gh-rest .quick, html.gh-rest .quick-note, html.gh-rest .np, html.gh-rest .shelf, html.gh-rest .apps,
+html.gh-rest .ghdial, html.gh-rest .cam-name, html.gh-rest .gh-hello {
+  opacity: 0; visibility: hidden; pointer-events: none; transition: opacity 1200ms ease, visibility 0s linear 1200ms;
+}
+html.gh-rest body::after { content: ""; position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 25; pointer-events: none; background: rgba(0, 0, 0, 0.55); animation: gh-dim 1500ms ease both; }
+@keyframes gh-dim { from { opacity: 0; } to { opacity: 1; } }
+@keyframes gh-drift {
+  0% { transform: translate(0, 0); } 20% { transform: translate(3rem, -1.5rem); } 40% { transform: translate(-2.5rem, -2rem); }
+  60% { transform: translate(-3rem, 1.5rem); } 80% { transform: translate(2.5rem, 2rem); } 100% { transform: translate(0, 0); }
+}
+html.gh-rest .cam { animation: gh-drift 420s ease-in-out infinite; box-shadow: none; }
+html.gh-rest .ghphoto { animation: gh-drift 540s ease-in-out infinite reverse; box-shadow: none; }
+html.gh-rest .ghstack { animation: gh-drift 480s ease-in-out infinite; animation-delay: -160s; }
 html.lighter .ghdial { transition: none; }
 html.lighter .ghphoto img { transition: none; }
 

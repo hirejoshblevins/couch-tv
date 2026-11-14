@@ -44,7 +44,7 @@ object GoogleHome {
     class Settings(
         val clientId: String, val clientSecret: String, val refreshToken: String, val project: String,
         val cameras: List<String>, val thermostat: Boolean, val album: String?, val photoSeconds: Int,
-        val stayAwake: Boolean, val greeting: Boolean,
+        val stayAwake: Boolean, val greeting: Boolean, val restMinutes: Int,
     )
     private class Cam(val device: String, val name: String)
 
@@ -94,7 +94,8 @@ object GoogleHome {
         }
         val album = o.optString("album").trim().takeIf { ALBUM.matches(it) }
         return Settings(id, secret, refresh, project, names.take(MOST), o.optBoolean("thermostat", false), album,
-            o.optInt("photo_seconds", 60).coerceIn(60, 3600), o.optBoolean("stay_awake", false), o.optBoolean("greeting", false))
+            o.optInt("photo_seconds", 60).coerceIn(60, 3600), o.optBoolean("stay_awake", false), o.optBoolean("greeting", false),
+            o.optInt("rest_minutes", 10).coerceIn(0, 60))
     }
 
     // ---------------------------------------------------------------- talking to Google
@@ -418,7 +419,7 @@ object GoogleHome {
         fun info(): String {
             val s = settings(app) ?: return "{}"
             return JSONObject().put("thermostat", s.thermostat).put("photos", s.album != null)
-                .put("photo_seconds", s.photoSeconds).put("greeting", s.greeting).toString()
+                .put("photo_seconds", s.photoSeconds).put("greeting", s.greeting).put("rest_minutes", s.restMinutes).toString()
         }
 
         @JavascriptInterface
