@@ -124,9 +124,12 @@
   function liveCams() { return cams.filter(function (x) { return x.state === "live"; }); }
   function noPicture(c) {
     var n = liveCams().length;
-    log("cam " + c.key + " connected, no picture; " + n + " others playing");
-    if (n >= 1 && n < cams.length) {
+    c.blank = (c.blank || 0) + 1;
+    log("cam " + c.key + " connected, no picture (" + c.blank + "); " + n + " others playing");
+    // once can be a bad start: try that camera again. Twice in a row, with others playing, is the TV's limit.
+    if (c.blank >= 2 && n >= 1 && n < cams.length) {
       maxLive = n;
+      log("taking turns: " + n + " at a time");
       park(c);
       rotateSoon();
     } else again(c);
@@ -230,7 +233,7 @@
         cam.video.addEventListener("playing", function () {
           if (!cam.pc) return;
           clearTimeout(cam.noPic); cam.noPic = null;
-          cam.tries = 0; cam.since = Date.now();
+          cam.tries = 0; cam.blank = 0; cam.since = Date.now();
           if (cam.state !== "live") log("cam " + cam.key + " playing " + cam.video.videoWidth + "x" + cam.video.videoHeight);
           mark(cam, "live");
         });
@@ -281,6 +284,8 @@
     if (!on()) return;
     if (!listed) return list();
     if (was) return;
+    // back from an app with every stream stopped: find out afresh how many this TV plays at once
+    if (!cams.some(function (x) { return x.pc; })) { maxLive = 99; for (var j = 0; j < cams.length; j++) { cams[j].parked = false; cams[j].blank = 0; mark(cams[j]); } }
     for (var k = 0; k < cams.length; k++) cams[k].tries = 0;
     startAll();
     rotateSoon();
