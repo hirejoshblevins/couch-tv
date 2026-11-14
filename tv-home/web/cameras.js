@@ -10,7 +10,9 @@
   "use strict";
   var ANSWER_MS = 20000;      // how long the launcher gets to answer
   var RENEW_MS = 210000;      // Google ends a stream after five minutes: renew at three and a half
-  var STAGGER_MS = 1200;      // start the cameras one after another, not all at once
+  var STAGGER_MS = 350;       // the cameras start together, a moment apart (see startAll)
+  var TOGETHER_MOST = 2;      // how often every stream is started afresh for one blank camera, before they take turns
+  var SOLO_MS = 4000;         // over the whole screen: a camera with no picture after this gets the TV to itself
   var WATCH_MS = 20000;       // a picture that stopped moving for two looks is started again
   var RETRY_MS = 15000, RETRY_MOST_MS = 300000;
   var LIMITED_MS = 70000;     // Google said "too many requests": it counts them by the minute
@@ -61,7 +63,7 @@
   // ---------------- one camera ----------------
   function mark(c, state) {
     if (state) c.state = state;
-    c.el.className = "cam" + (c.state === "live" ? " live" : "") + (c.parked ? " still" : "") + (c.focus ? " focus" : "") + (c.big ? " big" : "") + (c.big && ringing ? " ring" : "");
+    c.el.className = "cam" + (c.state === "live" ? " live" : "") + (c.parked || c.held ? " still" : "") + (c.focus ? " focus" : "") + (c.big ? " big" : "") + (c.big && ringing ? " ring" : "");
   }
 
   // Google wants the offer whole: wait for the candidates, but never for long.
@@ -137,24 +139,52 @@
     c.blank = (c.blank || 0) + 1;
     log("cam " + c.key + " connected, no picture (" + c.blank + "); " + n + " others playing");
     liveCams().forEach(learn);
-    // A camera that is not the smallest got no picture while others play: the order was wrong
-    // (its size was not known yet). Start them all again, biggest first. Only once.
-    var smallest = order()[cams.length - 1];
-    if (!reordered && n >= 1 && c !== smallest) {
-      reordered = true;
-      if (!sizes[c.name]) sizes[c.name] = 1e11;   // never seen: taken as big from now on
-      log("starting again, biggest picture first");
-      restartAll();
-      return;
+    // open over the whole screen: it gets the TV to itself
+    if (big && cams[at] === c) return solo(c);
+    if (n < 1 || big) return again(c);   // a camera is open over the whole screen: leave that one alone
+    // The TV gives out its video decoders when a stream starts. A camera that starts while the
+    // others already play their full picture can be left without one, yet all of them started
+    // together (while every picture is still small) fit. So: start them all again, together.
+    if (together < TOGETHER_MOST) {
+      together += 1;
+      log("starting all again, together (" + together + ")");
+      return restartAll();
     }
-    // once can be a bad start: try that camera again. Twice in a row, with others playing, is the TV's limit.
-    if (c.blank >= 2 && n >= 1 && n < cams.length) {
-      maxLive = n;
-      log("taking turns: " + n + " at a time");
-      park(c);
-      rotateSoon();
-    } else again(c);
+    maxLive = n;
+    log("taking turns: " + n + " at a time");
+    park(c);
+    rotateSoon();
   }
+  // Over the whole screen and no picture: stop the others (they keep their last picture) and
+  // start this one alone. They all come back when the big view closes.
+  var soloed = false, soloTimer = null, together = 0, calm = null;
+  function solo(c) {
+    log("cam " + c.key + " alone while it is open");
+    soloed = true;
+    clearTimeout(seqTimer); clearTimeout(rotateTimer);
+    for (var k = 0; k < cams.length; k++) if (cams[k] !== c && !cams[k].parked) park(cams[k]);
+    hold(c); stop(c);
+    c.parked = false; c.tries = 0; mark(c);
+    c.retry = setTimeout(function () { start(c); }, 700);
+  }
+  // The camera now open over the whole screen must play: at once when it was waiting its turn,
+  // and alone when it has no picture after a short while.
+  function front() {
+    clearTimeout(soloTimer);
+    var c = cams[at];
+    if (!big || !c || c.state === "live") return;
+    if (soloed) return solo(c);
+    if (c.parked) return swap(c);
+    soloTimer = setTimeout(function () { if (big && cams[at] === c && c.state !== "live") solo(c); }, SOLO_MS);
+  }
+  function unsolo() {
+    clearTimeout(soloTimer);
+    if (!soloed) return;
+    soloed = false;
+    log("big view closed: all cameras again");
+    restartAll();
+  }
+  function hold(c) { if (c.state === "live") { still(c); c.held = true; } }
   function still(c) {
     try {
       var v = c.video, k = c.canvas;
@@ -165,12 +195,13 @@
   }
   function park(c) {
     if (c.state === "live") still(c);
+    c.held = false;
     c.parked = true; c.parkedAt = Date.now();
     stop(c);
   }
   function rotateSoon() {
     clearTimeout(rotateTimer);
-    if (maxLive >= cams.length || !showing) return;
+    if (maxLive >= cams.length || !showing || soloed) return;
     rotateTimer = setTimeout(function () { swap(null); rotateSoon(); }, ROTATE_MS);
   }
   // Give the camera that has waited longest (or `want`) a turn, in place of the one playing longest.
@@ -207,6 +238,7 @@
 
   // Something went wrong: stop, and try again a little later each time.
   function again(c) {
+    hold(c);
     stop(c);
     if (!showing) return;
     var wait = Math.min(RETRY_MOST_MS, RETRY_MS * Math.pow(2, c.tries));
@@ -254,7 +286,10 @@
         cam.video.addEventListener("playing", function () {
           if (!cam.pc) return;
           clearTimeout(cam.noPic); cam.noPic = null;
-          cam.tries = 0; cam.blank = 0; cam.since = Date.now();
+          cam.tries = 0; cam.blank = 0; cam.since = Date.now(); cam.held = false;
+          // every camera playing for two minutes: the next blank one gets its fresh starts again
+          clearTimeout(calm);
+          if (liveCams().length + 1 >= cams.length) calm = setTimeout(function () { if (liveCams().length === cams.length) together = 0; }, 120000);
           if (cam.state !== "live") log("cam " + cam.key + " playing");
           learn(cam);
           mark(cam, "live");
@@ -266,19 +301,20 @@
     row.setAttribute("data-n", String(cams.length));
   }
 
-  // Start every camera that is not already up, one at a time, the biggest picture first. A TV has
-  // only a few fast (hardware) video decoders, often two; the next stream gets a slow one that
-  // manages a small picture and not a big one. So each camera waits for the one before it to
-  // show a picture, and the smallest goes last. Sizes are learned as the cameras play.
-  var seqTimer = null, reordered = false;
+  // Start every camera that is not already up, together (a moment apart). A TV gives out its
+  // fast video decoders as streams start, and Nest streams start small and grow: three that start
+  // together all get one, while a third that starts after two have grown can be left with no
+  // picture. When the cameras take turns, the biggest pictures go first and the rest wait.
+  var seqTimer = null;
   function order() {
     return cams.slice().sort(function (a, b) { return (sizes[b.name] || 1e12) - (sizes[a.name] || 1e12) || a.n - b.n; });
   }
   function startAll() {
     clearTimeout(seqTimer);
+    if (soloed) return;
     var list = order(), i = 0;
     (function next() {
-      if (!showing) return;
+      if (!showing || soloed) return;
       while (i < list.length && list[i].pc) i += 1;
       if (i >= list.length) return;
       var c = list[i]; i += 1;
@@ -289,18 +325,13 @@
       c.parked = false;
       clearTimeout(c.retry); c.retry = null;
       start(c);
-      var waited = 0;
-      seqTimer = setTimeout(function poll() {
-        waited += 500;
-        if (c.state === "live" || !c.pc || waited >= 9000) next();
-        else seqTimer = setTimeout(poll, 500);
-      }, 500);
+      seqTimer = setTimeout(next, STAGGER_MS);
     })();
   }
-  // Every stream stopped and started again in the right order (once: when a big picture got the slow decoder).
+  // Every stream stopped and started again together. Each tile keeps its last picture meanwhile.
   function restartAll() {
     clearTimeout(seqTimer);
-    for (var k = 0; k < cams.length; k++) { cams[k].parked = false; stop(cams[k]); }
+    for (var k = 0; k < cams.length; k++) { hold(cams[k]); cams[k].parked = false; stop(cams[k]); }
     seqTimer = setTimeout(startAll, 1500);
   }
 
@@ -333,7 +364,7 @@
     if (!listed) return list();
     if (was) return;
     // back from an app with every stream stopped: find out afresh how many this TV plays at once
-    if (!cams.some(function (x) { return x.pc; })) { maxLive = 99; reordered = false; for (var j = 0; j < cams.length; j++) { cams[j].parked = false; cams[j].blank = 0; mark(cams[j]); } }
+    if (!cams.some(function (x) { return x.pc; })) { maxLive = 99; together = 0; soloed = false; for (var j = 0; j < cams.length; j++) { cams[j].parked = false; cams[j].held = false; cams[j].blank = 0; mark(cams[j]); } }
     for (var k = 0; k < cams.length; k++) cams[k].tries = 0;
     startAll();
     rotateSoon();
@@ -344,7 +375,7 @@
     showing = false;
     clearTimeout(listTimer);
     clearTimeout(rotateTimer);
-    clearTimeout(seqTimer);
+    clearTimeout(seqTimer); clearTimeout(soloTimer);
     for (var k = 0; k < cams.length; k++) { clearTimeout(cams[k].retry); cams[k].retry = null; }
     clearTimeout(sleepTimer);
     sleepTimer = setTimeout(function () {
@@ -381,17 +412,18 @@
     focused = !!yes;
     if (!yes) { big = false; quiet(); }
     draw();
+    if (!big) unsolo();
   }
   // Returns "up" or "down" when the press leaves the row, else nothing.
   function move(dx, dy) {
-    if (dx) { at = Math.max(0, Math.min(cams.length - 1, at + dx)); draw(); if (big && cams[at].parked) swap(cams[at]); return null; }
+    if (dx) { at = Math.max(0, Math.min(cams.length - 1, at + dx)); draw(); front(); return null; }
     if (big) return null;
     return dy < 0 ? "up" : "down";
   }
   function quiet() { clearTimeout(ringTimer); ringing = false; }
-  function ok() { if (cams[at]) { big = !big; quiet(); draw(); if (big && cams[at].parked) swap(cams[at]); } }
-  function back() { if (!big) return false; big = false; quiet(); draw(); return true; }
-  function small() { if (big) { big = false; quiet(); draw(); } }
+  function ok() { if (cams[at]) { big = !big; quiet(); draw(); if (big) front(); else unsolo(); } }
+  function back() { if (!big) return false; big = false; quiet(); draw(); unsolo(); return true; }
+  function small() { if (big) { big = false; quiet(); draw(); unsolo(); } }
   // Someone pressed the doorbell (GoogleBell.kt, through tv.ring in app.js): that camera opens
   // over the whole screen with a line saying so. True when there is such a camera.
   function ring(key) {
@@ -401,8 +433,8 @@
       clearTimeout(ringTimer);
       ringTimer = setTimeout(function () { ringing = false; draw(); }, 45000);
       draw();
-      if (cams[k].parked) swap(cams[k]);
-      else if (!cams[k].pc) { cams[k].tries = 0; start(cams[k]); }
+      if (!cams[k].parked && !cams[k].pc) { cams[k].tries = 0; start(cams[k]); }
+      front();
       return true;
     }
     return false;

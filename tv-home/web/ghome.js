@@ -455,7 +455,14 @@
   }
   document.addEventListener("visibilitychange", function () { if (document.hidden) pause(); else resume(); });
 
-  window.googleHome = { reply: reply, tick: tick, resume: resume, pause: pause,
+  // The weather, asked through the launcher (app.js falls back to this when its own request fails).
+  function weather(lat, lon) {
+    return ask("weather", "", lat + "," + lon).then(function (r) {
+      if (!r || !r.ok || !isFinite(r.temp)) throw new Error("no weather");
+      return { temp: Math.round(r.temp), code: Math.round(r.code), text: "", is_day: !!r.is_day };
+    });
+  }
+  window.googleHome = { reply: reply, tick: tick, weather: weather, resume: resume, pause: pause,
     thermoOn: thermoOn, paint: paint, move: move, ok: ok, back: back, active: active, resting: resting,
     photoOn: photoOn, photoPaint: photoPaint, photoMove: photoMove, photoOk: photoOk, photoBack: photoBack,
     log: function (what) { try { if (native() && native().log) native().log(String(what)); } catch (e) {} } };

@@ -1059,11 +1059,16 @@
     var direct = OFFLINE || !!(ST.place && isFinite(ST.place.lat));
     return (direct ? weatherDirect() : api("GET", "/api/weather")).then(function (j) {
       data.weather = j;
+      try { localStorage.setItem("tvhome.wxlast", JSON.stringify({ at: Date.now(), w: j })); } catch (e) {}
       clock();
       updateAmbientWeather();
     }, function () {
       // a first try that failed (the network was still waking) is tried again soon, not in half an hour
-      if (!data.weather) { clearTimeout(wxRetry); wxRetry = setTimeout(refreshWeather, 45000); if (window.googleHome) window.googleHome.log("weather did not load, trying again"); }
+      if (!data.weather) {
+        // show the last reading (up to three hours old) while it is tried again
+        try { var last = JSON.parse(localStorage.getItem("tvhome.wxlast") || "null"); if (last && Date.now() - last.at < 3 * 3600000 && last.w) { data.weather = last.w; clock(); updateAmbientWeather(); } } catch (e) {}
+      }
+      if (!data.weather || direct) { clearTimeout(wxRetry); wxRetry = setTimeout(refreshWeather, 45000); if (window.googleHome) window.googleHome.log("weather did not load, trying again"); }
     });
   }
 
@@ -1078,6 +1083,12 @@
     return fetch(url).then(function (r) { return r.json(); }).then(function (j) {
       var c = j.current, code = Math.round(c.weather_code);
       return { temp: Math.round(c.temperature_2m), code: code, text: "", is_day: !!c.is_day };
+    }).catch(function (e) {
+      // the page's own request failed (seen on a Sony Google TV): the launcher makes the same one
+      var gh = window.googleHome;
+      if (!gh || !gh.weather || !window.TVGH) throw e;
+      gh.log("weather: the page's request failed (" + String(e && e.message || e).slice(0, 80) + "), asking the launcher");
+      return gh.weather(WXCFG.lat, WXCFG.lon);
     });
   }
 
@@ -2870,6 +2881,13 @@
       if (dx) {
         var nx = g + dx;
         if (nx >= 0 && nx < gridEls.length && Math.floor(nx / GRID_COLS) === row) g = nx;
+      } else if (dy < 0 && row === 0 && expanded) {
+        // Up from the top row of the full apps view goes back to the home and its short dock
+        expanded = false; renderGrid();
+        var up = -1;
+        gridItems.forEach(function (x, i) { if (up < 0 && dockBack && gridKey(x) === dockBack) up = i; });
+        dockBack = null;
+        g = up >= 0 ? up : Math.min(g, Math.max(0, gridEls.length - 1));
       } else if (dy < 0 && row === 0) {
         if (cards.length) zone = "shelf";
         else if (camsOn()) { var gb = gridEls[g] ? gridEls[g].getBoundingClientRect() : null; zone = "cams"; window.googleCams.land(gb ? gb.left + gb.width / 2 : null); }

@@ -56,6 +56,7 @@ object GoogleHome {
     private val PROJECT = Regex("[0-9a-f-]{20,64}")
     private val SUBSCRIPTION = Regex("projects/[a-z][a-z0-9-]{4,40}/subscriptions/[A-Za-z][A-Za-z0-9._~-]{2,254}")
     private const val PUBSUB = "https://pubsub.googleapis.com/v1/"
+    private const val WEATHER = "https://api.open-meteo.com/v1/forecast"
     private const val CHIME = "sdm.devices.events.DoorbellChime.Chime"
     private const val RING_FRESH_MS = 90_000L   // a press older than this, found waiting, is not announced
     private val DEVICE = Regex("enterprises/[0-9a-f-]{20,64}/devices/[0-9A-Za-z_-]{10,200}")
@@ -117,7 +118,7 @@ object GoogleHome {
 
     /** One call to one of Google's two addresses. The status code and the body, or -1 when it failed. */
     private fun call(url: String, bearer: String?, form: String?, json: JSONObject?, wait: Int = 12000): Pair<Int, JSONObject?> {
-        if (!url.startsWith(TOKEN_URL) && !url.startsWith(API) && !url.startsWith(PUBSUB)) return -1 to null
+        if (!url.startsWith(TOKEN_URL) && !url.startsWith(API) && !url.startsWith(PUBSUB) && !url.startsWith(WEATHER)) return -1 to null
         var c: HttpURLConnection? = null
         return try {
             c = URL(url).openConnection() as HttpURLConnection
@@ -452,6 +453,18 @@ object GoogleHome {
             "tset" -> if (s.thermostat) setTemperature(s, value) else refused
             "tmode" -> if (s.thermostat) setMode(s, value) else refused
             "photos" -> photos(s, agent)
+            "weather" -> {
+                // The page's own request to Open-Meteo sometimes fails on a TV; this is the same
+                // request made from here. Only two numbers come from the page, nothing is sent but them.
+                val at = value.split(",").mapNotNull { it.trim().toDoubleOrNull() }
+                if (at.size != 2 || at[0] !in -90.0..90.0 || at[1] !in -180.0..180.0) return refused
+                val (code, o) = call(WEATHER + "?latitude=${at[0]}&longitude=${at[1]}" +
+                    "&current=temperature_2m,weather_code,is_day&timezone=auto&forecast_days=1", null, null, null)
+                val c = o?.optJSONObject("current")
+                if (code != 200 || c == null || !c.has("temperature_2m")) { note("weather: answered $code"); return failed(code, o) }
+                JSONObject().put("ok", true).put("temp", c.optDouble("temperature_2m"))
+                    .put("code", c.optInt("weather_code")).put("is_day", c.optInt("is_day") == 1)
+            }
             else -> refused
         }
     }
