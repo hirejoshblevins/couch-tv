@@ -412,6 +412,52 @@ normally all the time because it is the home screen.
 from a TV remote), single lights or switches as their own buttons (use a scene or a script), and
 anything outside Home Assistant.
 
+## Google Home cameras (optional, live, no Home Assistant)
+
+Off unless you add it. This fork can show your Google Nest cameras and doorbells live on the home,
+in a row above the apps, straight from Google with nothing else running at home. It uses Google's
+own Device Access (Smart Device Management) API with keys that you make and that only you hold.
+
+```json
+"google_home": {
+  "cameras": ["Front Porch", "Backyard", "Kitchen camera"]
+}
+```
+
+```sh
+# .env
+GOOGLE_OAUTH_CLIENT_ID=<the OAuth client id>
+GOOGLE_OAUTH_CLIENT_SECRET=<its secret>
+GOOGLE_REFRESH_TOKEN=<the refresh token from approving your cameras>
+GOOGLE_DEVICE_ACCESS_PROJECT_ID=<the Device Access project id>
+```
+
+| Key | What it does |
+|---|---|
+| `cameras` | Which cameras, and in what order, by the name the Google Home app shows (a camera with no name of its own goes by its room). Up to 4. Left out or empty: every camera you shared. |
+| `enabled` | `false` switches the row off without deleting the section. |
+
+**What you need from Google, once:** a Device Access registration (Google charges a one-time US$5),
+a Google Cloud project with the Smart Device Management API switched on and an OAuth client of type
+"Web application" with `https://www.google.com` as a redirect address, a Device Access project
+that names that client, and your approval of the cameras for it. Set the OAuth app to "In
+production": in "Testing" Google ends the approval after 7 days. The four values go in `.env`,
+never in `config.json` and never in git; `apply.sh` hands them to the TV app on their own, like the
+Home Assistant token, and the app keeps them in its private storage. The page on the TV never sees
+them, nor a device id: it asks the app, and the app only lists your cameras and starts, renews or
+stops a live stream.
+
+**How it behaves.** The row shows while the home is in front. Each camera is a WebRTC stream that
+Google ends after five minutes unless it is renewed, so the home renews it at three and a half. An
+app in front for under a minute leaves the streams up; longer, and they stop until the home is
+back. Google allows only a few stream starts a minute: after "too many requests" the home waits a
+little over a minute before it tries again. The row is a picture, not a control, and has no sound.
+With shows on Keep watching the row moves up and shrinks so both fit. Battery cameras work but are
+woken by every start, so they suit this poorly.
+
+Preview with no TV and no Google: `?mock=1&cams=3` shows the row with three named, empty tiles.
+
+
 Preview with no TV and no Home Assistant: `?mock=1&ha=1` (see the end of this page). The doorbell
 card is drawn by the app itself, so it cannot be previewed in a browser.
 

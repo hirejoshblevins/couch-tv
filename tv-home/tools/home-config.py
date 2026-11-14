@@ -14,6 +14,12 @@ apply.sh to hand to the app on its own ("ha_b64"); the app keeps it apart from t
 token (from HOME_ASSISTANT_TOKEN in .env, else "token" in the section), so it is never printed
 to the screen by apply.sh and never written to a file. --check prints only what is set up, no
 token, and "doorbell" on its own line when there is a doorbell (apply.sh uses that).
+
+       .venv/bin/python tv-home/tools/home-config.py --gh [--check]
+The Google Home cameras section ("google_home" in config.json, docs/CONFIG.md) with the four Google
+values from .env, base64 encoded, for apply.sh to hand to the app on its own ("gh_b64"). Prints
+"none" when it is off or a value is missing. Holds secrets, so it is handled like --ha. --check
+prints only which cameras are asked for.
 """
 import base64
 import json
@@ -73,6 +79,42 @@ def smart_home():
     if not out["climate"] and not out["scenes"] and "doorbell" not in out:
         return None
     return out
+
+
+def google_home():
+    """The checked Google Home section with its secrets from .env, or None when it is off."""
+    gh = config.CONFIG.get("google_home")
+    if not isinstance(gh, dict) or gh.get("enabled") is False:
+        return None
+    want = {
+        "client_id": ("GOOGLE_OAUTH_CLIENT_ID", r"[0-9A-Za-z._-]{20,200}"),
+        "client_secret": ("GOOGLE_OAUTH_CLIENT_SECRET", r"[0-9A-Za-z_-]{10,200}"),
+        "refresh_token": ("GOOGLE_REFRESH_TOKEN", r"[0-9A-Za-z/_.-]{20,2048}"),
+        "project_id": ("GOOGLE_DEVICE_ACCESS_PROJECT_ID", r"[0-9a-f-]{20,64}"),
+    }
+    out = {}
+    for key, (env, shape) in want.items():
+        v = (os.environ.get(env) or "").strip()
+        if not re.fullmatch(shape, v):
+            print(f"home-config: {env} is missing from .env or does not look right, Google Home cameras stay off",
+                  file=sys.stderr)
+            return None
+        out[key] = v
+    cams = gh.get("cameras")
+    out["cameras"] = [str(c).strip()[:60] for c in cams if str(c).strip()][:4] if isinstance(cams, list) else []
+    return out
+
+
+if "--gh" in sys.argv:
+    gh = google_home()
+    if "--check" in sys.argv:
+        if gh:
+            print("Google Home cameras: " + (", ".join(gh["cameras"]) if gh["cameras"] else "every shared camera"))
+        else:
+            print("Google Home cameras: off")
+    else:
+        print(base64.b64encode(json.dumps(gh, separators=(",", ":")).encode()).decode() if gh else "none")
+    sys.exit(0)
 
 
 if "--key" in sys.argv:

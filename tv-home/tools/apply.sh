@@ -241,6 +241,11 @@ PAIRING_KEY=$("$PY" "$HERE/home-config.py" --key)
 HA64=$("$PY" "$HERE/home-config.py" --ha)
 SMART=$("$PY" "$HERE/home-config.py" --ha --check)
 echo "     $(echo "$SMART" | head -1)"
+# Google Home cameras (optional, docs/CONFIG.md): the google_home section and the four Google
+# values from .env go to the app the same way, on their own and never printed. "none" switches
+# the camera row off on the TV.
+GH64=$("$PY" "$HERE/home-config.py" --gh)
+echo "     $("$PY" "$HERE/home-config.py" --gh --check)"
 # The doorbell card shows over other apps, which needs "display over other apps". Only granted
 # when a doorbell is set up; taken back if one was set up before and is not any more.
 if echo "$SMART" | grep -qx doorbell; then
@@ -248,7 +253,7 @@ if echo "$SMART" | grep -qx doorbell; then
 elif "$PY" "$T" shell "appops get app.couchtv.launcher SYSTEM_ALERT_WINDOW" 2> /dev/null | grep -q allow; then
   "$PY" "$T" shell "appops set app.couchtv.launcher SYSTEM_ALERT_WINDOW default"
 fi
-"$PY" "$T" shell "am force-stop app.couchtv.launcher; am start -n $HOME_ACT --es bridge ${BRIDGE_URL:-none} --es config_b64 $CFG64 --es ha_b64 $HA64 ${TV_ID:+--es tv $TV_ID} --es key \"${PAIRING_KEY:-}\""
+"$PY" "$T" shell "am force-stop app.couchtv.launcher; am start -n $HOME_ACT --es bridge ${BRIDGE_URL:-none} --es config_b64 $CFG64 --es ha_b64 $HA64 --es gh_b64 $GH64 ${TV_ID:+--es tv $TV_ID} --es key \"${PAIRING_KEY:-}\""
 
 # The Home button watch (FireWatch.kt: it only sees which window came forward). The TV's own home
 # stays on, so at power on, and from the Home key on Google TV and Fire TV, the TV opens its own

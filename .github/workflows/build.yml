@@ -54,6 +54,9 @@ jobs:
           fi
 
       - name: Build the TV apps
+        # a fork's builds look for updates in the fork's own releases, never in another signer's
+        env:
+          UPDATE_REPO: ${{ github.repository }}
         run: sh scripts/build-apk.sh
 
       - name: On-TV app unit tests

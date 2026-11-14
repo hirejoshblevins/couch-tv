@@ -178,6 +178,23 @@
   };
   window.MOCK_APPS = apps.map(function (a) { return { kind: "app", name: a[1], package: a[0], colour: a[2] }; });
 
+  // ---------- pretend Google Home cameras (cameras.js) ----------
+  // Stands in for the launcher's window.TVGH with ?cams=1: three named tiles and no picture,
+  // since there is no Google behind it. Shows where the row sits and how it looks while waiting.
+  if (arg("cams")) {
+    var camNames = ["Front Porch", "Backyard", "Kitchen camera"].slice(0, Math.max(1, Math.min(4, parseInt(arg("cams"), 10) || 3)));
+    if (arg("cams") === "4") camNames = ["Front Porch", "Backyard", "Kitchen camera", "Garage"];
+    window.TVGH = {
+      on: function () { return true; },
+      request: function (id, action) {
+        var r = action === "cameras"
+          ? { ok: true, cameras: camNames.map(function (n, k) { return { key: "c" + k, name: n }; }) }
+          : { ok: false, error: "failed" };
+        setTimeout(function () { if (window.googleCams) window.googleCams.reply(id, r); }, 150);
+      }
+    };
+  }
+
   // ---------- a pretend Home Assistant (smart home, smarthome.js) ----------
   // Stands in for the launcher's window.TVHA. Made up rooms and scenes, nothing real is switched.
   var ha = arg("ha");

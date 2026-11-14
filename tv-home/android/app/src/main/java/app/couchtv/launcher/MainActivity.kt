@@ -259,6 +259,7 @@ class MainActivity : Activity() {
         }
         e.apply()
         HomeAssistant.readExtras(this, i)   // smart home ("ha_b64"), kept apart from the page's settings
+        GoogleHome.readExtras(this, i)   // Google Home cameras ("gh_b64"), kept apart the same way
     }
 
     // ---------------------------------------------------------------- finding the bridge
@@ -353,6 +354,7 @@ class MainActivity : Activity() {
         settings.textZoom = 100
         addJavascriptInterface(Native(), "TVOS")
         addJavascriptInterface(HomeAssistant.Page(this@MainActivity, this), "TVHA")   // smart home, see HomeAssistant.kt
+        addJavascriptInterface(GoogleHome.Page(this@MainActivity, this), "TVGH")   // Google Home cameras, see GoogleHome.kt
         addJavascriptInterface(Updater.Page(this@MainActivity, this), "TVUP")   // updates from GitHub releases, see Updater.kt
         webViewClient = object : WebViewClient() {
             override fun onPageFinished(view: WebView, url: String) {

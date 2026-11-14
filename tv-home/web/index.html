@@ -96,6 +96,10 @@
     <div class="shelf-row"><div class="np-slot" id="np-slot"></div><div class="shelf-clip"><div class="shelf-track" id="shelf"></div></div></div>
   </section>
 
+  <!-- Google Home cameras (optional): a row of live feeds, drawn by cameras.js. After the shelf
+       on purpose: app.css puts the row where Keep watching sits while that is empty -->
+  <section class="cams" id="cams" aria-label="Cameras"></section>
+
   <section class="apps" id="apps-section" aria-label="Apps">
     <p class="hint" id="hint" aria-live="polite"></p>
     <div class="grid" id="grid"></div>
@@ -153,6 +157,7 @@
 <script src="i18n.js"></script>
 <script src="config.js"></script>
 <script src="smarthome.js"></script>
+<script src="cameras.js"></script>
 <script src="soundscape.js"></script>
 <script src="clearicon.js"></script>
 <script src="ambient-weather.js"></script>

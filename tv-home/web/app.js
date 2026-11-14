@@ -4620,9 +4620,9 @@
     noDream: function () { note(t("no_dream")); },
     // the remote's Settings/gear key, caught by the launcher natively (MainActivity.dispatchKeyEvent)
     settingsKey: function () { blip(0, 0); settingsKey(); },
-    resume: function () { toggleScreenOff(false); setIdleAmbient(false); resetSmartIdle(); okReset(); refresh(); if (!OFFLINE) refreshQuick(); refreshWeather(); startVideo(); sceneVideos(true); refreshMusic(); if (window.AmbientWeather) window.AmbientWeather.resume(); resetIdlePhoto(); },
+    resume: function () { toggleScreenOff(false); setIdleAmbient(false); resetSmartIdle(); okReset(); refresh(); if (!OFFLINE) refreshQuick(); refreshWeather(); startVideo(); sceneVideos(true); refreshMusic(); if (window.AmbientWeather) window.AmbientWeather.resume(); resetIdlePhoto(); if (window.googleCams) window.googleCams.resume(); },
     // an app is in front: the video background stops until the home is back
-    pause: function () { saveFocusNow(); pauseVideo(); },
+    pause: function () { saveFocusNow(); pauseVideo(); if (window.googleCams) window.googleCams.pause(); },
     // the launcher's file picker has copied the chosen photos into its own storage (Home settings)
     photosAdded: function (names) { photosAdded(names); },
     // the launcher's updater has news (Updater.kt)
@@ -4721,6 +4721,7 @@
     }).catch(function () {});
     hello.then(refresh).then(function () { mark("home-painted-live"); updTell(); updAsk(); homeAsk(); });
     resetIdlePhoto();
+    if (window.googleCams) window.googleCams.resume();   // Google Home cameras (cameras.js): a preview's pretend launcher is in by now
   }
 
   if (MOCK || PREVIEW) {

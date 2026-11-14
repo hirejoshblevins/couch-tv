@@ -49,5 +49,9 @@
     "climate": [{ "entity": "climate.living_room", "name": "Living room" }],
     "scenes": [{ "entity": "scene.movie_night", "name": "Movie night" }],
     "doorbell": { "entity": "event.front_door_ding", "camera": "camera.front_door", "name": "Front door" }
+  },
+  "google_home": {
+    "enabled": false,
+    "cameras": ["Front door", "Backyard"]
   }
 }
