@@ -295,6 +295,8 @@ def _home(h):
         "scenes": scenes or list(SCENE_IDS),
         "scene_seconds": _int(h.get("scene_seconds"), 20, 5, 3600),
         "dock_size": _int(h.get("dock_size"), DOCK_LIMIT, 1, DOCK_LIMIT),
+        # this fork: how many apps the dock starts with when dock_size leaves room (0 = all)
+        "dock_first": _int(h.get("dock_first"), 0, 0, DOCK_LIMIT),
         # your own scenes, in backgrounds/mine/ (docs/MAKE-A-SCENE.md)
         "my_scenes": mine,
     }
