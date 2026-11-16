@@ -14,7 +14,9 @@ android {
         minSdk = 23          // Android 6.0 (older Mi TVs); Fire OS 6 (7.1) sticks install it too
         targetSdk = 34
         versionCode = 14
-        versionName = "0.12"
+        // This fork (Josh's TV) counts its own versions: 1.0.<build number> on GitHub, 1.0 built by hand.
+        // It is built on couch-tv 0.12 (Home settings, About says so).
+        versionName = "1.0" + (System.getenv("GITHUB_RUN_NUMBER")?.takeIf { it.all(Char::isDigit) }?.let { ".$it" } ?: "")
         // Where the bridge might be: ./gradlew assembleRelease -PbridgeUrls=http://my-computer.local:5400
         // (comma separated, more than one is fine). The last one that answered is remembered on the TV.
         // Without it, apply.sh tells the app the address when it installs (the "bridge" extra), and

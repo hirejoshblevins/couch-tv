@@ -2244,6 +2244,10 @@
     var keep = Math.max(0, DOCK_APPS - inputs.length);   // pinned inputs take dock places, so they are never pushed behind More apps
     var items = shown.slice(0, keep).concat(inputs, shown.slice(keep), screens, rest.filter(tucked));
     var line = Math.min(DOCK_APPS, shown.length + inputs.length);
+    // home.dock_first: how many apps the dock starts with when it can hold more (home.dock_size).
+    // Only until the apps are arranged on the TV: after that the saved line decides.
+    var first = parseInt(HOME.dock_first, 10);
+    if (first >= 1) line = Math.min(line, first);
     var o = data.order;
     if (o && o.saved) {
       var at = {};
@@ -3194,7 +3198,7 @@
     ["apps", "apps"], ["people", "person"], ["quick", "bolt"], ["about", "info"]];
   var SET = { col: "secs", sec: 0, ri: 0, keyFocus: null, sub: null, lift: null, confirm: null, dirty: false, typing: null,
     msg: "", geo: { q: "", list: null, busy: false, err: false } };
-  var REPO_URL = "github.com/Seagey/couch-tv";
+  var REPO_URL = "github.com/hirejoshblevins/couch-tv";   // this fork; it is built on github.com/Seagey/couch-tv
   var WX_DEFAULT = { lat: -33.8688, lon: 151.2093, place: "Sydney", timezone: "Australia/Sydney" };
   var pushTimer = null;
 
@@ -3282,12 +3286,23 @@
   function head(label) { return { kind: "head", key: "h:" + label, label: label }; }
   function info(key, label, value, sub) { return { kind: "info", key: key, label: label, value: value, sub: sub }; }
 
+  // This fork with Google Home on: rows that no longer do anything here are left out, so Home
+  // settings only lists what works. The greeting stack replaced the scenes' own clock (Clock
+  // style), rest mode replaced "Hide rows when idle", the TV's screensaver never comes up over a
+  // home that stays awake (and apply.sh switches it off), Keep watching would push the cameras
+  // out of place, and the Now playing card needs a computer that this setup does not have.
+  function forkRows(rows) {
+    if (!(window.googleHome && window.TVGH && OFFLINE)) return rows;
+    var gone = { "idle-photo-seconds": 1, "ambient": 1, "clock-style": 1, "keep-watching": 1, "now-playing": 1, "ambient-music": 1, "np-note": 1 };
+    gone["h:" + t("ambient_head")] = 1; gone["h:" + t("np_head")] = 1;
+    return rows.filter(function (r) { return !gone[r.key]; });
+  }
   function sectionRows(id) {
     if (id === "updates") return updateRows();
     if (id === "language") return languageRows();
     if (id === "location") return locationRows();
     if (id === "weather") return weatherRows();
-    if (id === "look") return lookRows();
+    if (id === "look") return forkRows(lookRows());
     if (id === "apps") return appsRows();
     if (id === "people") return peopleRows();
     if (id === "quick") return quickRows();
@@ -3937,7 +3952,7 @@
     if (hs === "ask") homeRows.push({ kind: "action", key: "make-home", label: t("home_row"), sub: t("home_row_sub"), act: requestHome });
     else if (hs === "google_tv") homeRows.push(info("make-home", t("home_row"), "", t("home_google_tv")));
     return homeRows.concat([
-      info("ver", t("about_version"), ver || t("about_web")),
+      info("ver", t("about_version"), ver ? "Josh's TV " + ver : t("about_web"), "Built on couch-tv 0.12 (github.com/Seagey/couch-tv)"),
       info("code", t("about_code"), REPO_URL),
       info("run", t("about_running"), t(run)),
       info("kept", t("about_kept"), t(OFFLINE || data.bridge === false ? "kept_tv" : "kept_both")),
@@ -4804,7 +4819,7 @@
     document.addEventListener("wheel", resetSmartIdle, { passive: true });
     initSettings();
     // Home settings gets an Updates section, before About, where the launcher can update itself
-    if (updRead() && UPD.supported) SECS.splice(SECS.length - 1, 0, ["updates", "download"]);
+    if (updRead() && UPD.supported && !(window.TVGH && OFFLINE)) SECS.splice(SECS.length - 1, 0, ["updates", "download"]);
     mark("app-start");
     clock();
     setInterval(clock, 15000);
