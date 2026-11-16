@@ -138,6 +138,7 @@
     var n = liveCams().length;
     c.blank = (c.blank || 0) + 1;
     log("cam " + c.key + " connected, no picture (" + c.blank + "); " + n + " others playing");
+    why(c);
     liveCams().forEach(learn);
     // open over the whole screen: it gets the TV to itself
     if (big && cams[at] === c) return solo(c);
@@ -189,6 +190,26 @@
     startAll();
   }
   function hold(c) { if (c.state === "live") { still(c); c.held = true; } }
+  // For the log: how far the stream got (the network path, then data arriving, then decoding).
+  function why(c) {
+    var pc = c.pc;
+    if (!pc) return;
+    var head = "cam " + c.key + " ice " + pc.iceConnectionState + ", link " + (pc.connectionState || "?");
+    try {
+      pc.getStats().then(function (st) {
+        var out = head;
+        st.forEach(function (r) {
+          if (r.type === "inbound-rtp" && (r.kind === "video" || r.mediaType === "video"))
+            out += ", video bytes " + (r.bytesReceived || 0) + ", packets " + (r.packetsReceived || 0) + ", frames in " + (r.framesReceived || 0) +
+              ", decoded " + (r.framesDecoded || 0) + ", dropped " + (r.framesDropped || 0) + ", key frames " + (r.keyFramesDecoded || 0) +
+              ", decoder " + String(r.decoderImplementation || "none").slice(0, 40);
+          if (r.type === "candidate-pair" && r.nominated) out += ", pair " + r.state;
+          if (r.type === "local-candidate" && r.candidateType) out += ", local " + r.candidateType + "/" + r.protocol;
+        });
+        log(out.slice(0, 600));
+      }, function () { log(head); });
+    } catch (e) { log(head); }
+  }
   function still(c) {
     try {
       var v = c.video, k = c.canvas;

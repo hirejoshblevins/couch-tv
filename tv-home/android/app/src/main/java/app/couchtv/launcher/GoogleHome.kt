@@ -147,6 +147,7 @@ object GoogleHome {
             }
             code to try { JSONObject(String(out.toByteArray(), Charsets.UTF_8)) } catch (e: Exception) { null }
         } catch (e: Exception) {
+            note("request to ${try { URL(url).host } catch (x: Exception) { "?" }} failed: ${e.javaClass.simpleName}")
             -1 to null
         } finally {
             c?.disconnect()
