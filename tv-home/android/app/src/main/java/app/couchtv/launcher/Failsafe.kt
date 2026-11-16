@@ -53,8 +53,8 @@ object Failsafe {
         val main = Handler(Looper.getMainLooper())
         main.post {
             runCatching {
-                Toast.makeText(app, if (aside) "Google TV home. Press Home 5 times quickly to go back to Couch TV."
-                    else "Back to Couch TV.", Toast.LENGTH_LONG).show()
+                Toast.makeText(app, if (aside) "Google TV home. Press Home 5 times quickly to go back to Josh's TV."
+                    else "Back to Josh's TV.", Toast.LENGTH_LONG).show()
             }
         }
         // after the press itself has had its effect

@@ -1,10 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- This fork's icon: JTV in block letters on green. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="48dp" android:height="48dp"
     android:viewportWidth="48" android:viewportHeight="48">
-    <path android:fillColor="#0D1E19" android:pathData="M0,0h48v48h-48z" />
-    <path android:fillColor="#191D1A" android:pathData="M12,10h24v14h-24z" />
-    <path android:fillColor="#131614" android:pathData="M12,25h24v13h-24z" />
-    <path android:fillColor="#F2EAD8" android:pathData="M18,15h3v19h-3z M27,15h3v19h-3z M21,23h6v3h-6z" />
-    <path android:fillColor="#FFB52E" android:pathData="M12,41h24v2h-24z" />
+    <path android:fillColor="#0B3D24" android:pathData="M0,0h48v48h-48z" />
+    <path android:fillColor="#F4FFF7" android:pathData="M13,16h3v16h-3z M7,29h9v3h-9z M7,25h3v4h-3z M19,16h10v3h-10z M22.5,16h3v16h-3z M32,16L35,16L36.5,27L38,16L41,16L38,32L35,32Z" />
+    <path android:fillColor="#3DDC84" android:pathData="M7,36h34v2h-34z" />
 </vector>
