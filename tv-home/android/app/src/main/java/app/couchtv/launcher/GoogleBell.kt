@@ -25,6 +25,8 @@ import android.widget.TextView
  * "google_home" has an "events_subscription". Then, while the screen is on, one thread waits on
  * Google for a doorbell press (GoogleHome.rings). When someone rings:
  *   the home is in front: it opens that doorbell's camera over the whole screen;
+ *   (a camera that saw a person, where config.json asks for that, is only marked on the home when
+ *   the home is in front, and is not announced at all over an app)
  *   an app is in front:   a small card slides in at the top right. OK on the remote opens the
  *                         home on that camera; any other button only hides the card, and it goes
  *                         by itself after 45 seconds.
@@ -68,16 +70,18 @@ object GoogleBell {
     }
 
     private fun ring(c: Context, r: GoogleHome.Ring) {
-        if (MainActivity.inFront) { open(c, r.key); return }
+        // The home is in front: the doorbell opens its camera; a person seen is only marked on the home.
+        if (MainActivity.inFront) { open(c, r.key, if (r.kind == "person") "gh_alert" else "gh_ring"); return }
+        if (r.kind == "person") return   // an app is in front: only the doorbell interrupts what is being watched
         main.removeCallbacks(timeUp)
         main.postDelayed(timeUp, RING_MS)
         if (card == null) show(c, r)
     }
 
     /** Brings the home forward on that camera (MainActivity.onNewIntent, then tv.ring on the page). */
-    private fun open(c: Context, key: String) {
+    private fun open(c: Context, key: String, how: String = "gh_ring") {
         try {
-            c.startActivity(Intent(c, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK).putExtra("gh_ring", key))
+            c.startActivity(Intent(c, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK).putExtra(how, key))
         } catch (e: Exception) {}
     }
 

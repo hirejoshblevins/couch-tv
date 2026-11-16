@@ -46,8 +46,13 @@ object GoogleHome {
         val clientId: String, val clientSecret: String, val refreshToken: String, val project: String,
         val cameras: List<String>, val thermostat: Boolean, val album: String?, val photoSeconds: Int,
         val stayAwake: Boolean, val greeting: Boolean, val restMinutes: Int, val events: String?,
+        /** How many of the cameras are tiles on the home; the rest are reached only from the big view. 0 = all. */
+        val tiles: Int = 0,
+        /** Cameras (by name) whose "person seen" events are announced. */
+        val personAlerts: List<String> = emptyList(),
     )
-    class Ring(val key: String, val name: String)
+    /** kind: "bell" (the doorbell was pressed) or "person" (a camera saw a person). */
+    class Ring(val key: String, val name: String, val kind: String = "bell")
     private class Cam(val device: String, val name: String)
 
     private val CLIENT_ID = Regex("[0-9A-Za-z._-]{20,200}")
@@ -58,6 +63,9 @@ object GoogleHome {
     private const val PUBSUB = "https://pubsub.googleapis.com/v1/"
     private const val WEATHER = "https://api.open-meteo.com/v1/forecast"
     private const val CHIME = "sdm.devices.events.DoorbellChime.Chime"
+    private const val PERSON = "sdm.devices.events.CameraPerson.Person"
+    private const val PERSON_QUIET_MS = 5 * 60_000L   // one "person seen" per camera in this time
+    private val personAt = HashMap<String, Long>()
     private const val RING_FRESH_MS = 90_000L   // a press older than this, found waiting, is not announced
     private val DEVICE = Regex("enterprises/[0-9a-f-]{20,64}/devices/[0-9A-Za-z_-]{10,200}")
     private val ALBUM = Regex("https://photos\\.app\\.goo\\.gl/[A-Za-z0-9]{5,40}|https://photos\\.google\\.com/share/[A-Za-z0-9_-]{20,200}\\?key=[A-Za-z0-9_-]{10,200}")
@@ -104,7 +112,9 @@ object GoogleHome {
         return Settings(id, secret, refresh, project, names.take(MOST), o.optBoolean("thermostat", false), album,
             o.optInt("photo_seconds", 60).coerceIn(60, 3600), o.optBoolean("stay_awake", false), o.optBoolean("greeting", false),
             o.optInt("rest_minutes", 10).coerceIn(0, 60),
-            o.optString("events_subscription").trim().takeIf { SUBSCRIPTION.matches(it) })
+            o.optString("events_subscription").trim().takeIf { SUBSCRIPTION.matches(it) },
+            o.optInt("camera_tiles", 0).coerceIn(0, MOST),
+            (o.optJSONArray("person_alerts")?.let { a -> (0 until a.length()).map { a.optString(it).trim().take(60) }.filter { it.isNotEmpty() } } ?: emptyList()).take(MOST))
     }
 
     // ---------------------------------------------------------------- talking to Google
@@ -245,15 +255,24 @@ object GoogleHome {
                 JSONObject(String(android.util.Base64.decode(m.optJSONObject("message")?.optString("data").orEmpty(), android.util.Base64.DEFAULT), Charsets.UTF_8))
             } catch (e: Exception) { continue }
             val update = data.optJSONObject("resourceUpdate") ?: continue
-            if (update.optJSONObject("events")?.has(CHIME) != true) continue
+            val events = update.optJSONObject("events") ?: continue
+            val kind = if (events.has(CHIME)) "bell" else if (events.has(PERSON)) "person" else continue
             val at = if (android.os.Build.VERSION.SDK_INT < 26) null
                 else try { java.time.OffsetDateTime.parse(data.optString("timestamp")).toInstant().toEpochMilli() } catch (e: Exception) { null }
             if (at != null && System.currentTimeMillis() - at > RING_FRESH_MS) continue
             val n = list.indexOfFirst { it.device == update.optString("name") }
-            if (n >= 0 && out.none { it.key == "c$n" }) out.add(Ring("c$n", list[n].name))
+            if (n < 0) continue
+            if (kind == "person") {
+                if (s.personAlerts.none { it.equals(list[n].name, ignoreCase = true) }) continue
+                val now = System.currentTimeMillis()
+                if (now - (personAt["c$n"] ?: 0L) < PERSON_QUIET_MS) continue
+                personAt["c$n"] = now
+            }
+            if (out.none { it.key == "c$n" && it.kind == kind }) out.add(Ring("c$n", list[n].name, kind))
         }
+        out.sortBy { if (it.kind == "bell") 0 else 1 }   // a press at the door comes first
         if (acks.length() > 0) call("$PUBSUB$sub:acknowledge", t, null, JSONObject().put("ackIds", acks))
-        if (out.isNotEmpty()) note("doorbell: ${out.size} pressed")
+        if (out.isNotEmpty()) note("events: " + out.joinToString { it.kind + " " + it.key })
         return out
     }
 
@@ -426,7 +445,8 @@ object GoogleHome {
             "cameras" -> {
                 val list = cameras(s, true) ?: return JSONObject().put("ok", false).put("error", "failed")
                 JSONObject().put("ok", true).put("cameras",
-                    JSONArray(list.mapIndexed { n, c -> JSONObject().put("key", "c$n").put("name", c.name) }))
+                    JSONArray(list.mapIndexed { n, c -> JSONObject().put("key", "c$n").put("name", c.name)
+                        .put("extra", s.tiles > 0 && n >= s.tiles) }))
             }
             "offer" -> {
                 val c = cam(s, key) ?: return refused
@@ -460,11 +480,14 @@ object GoogleHome {
                 val at = value.split(",").mapNotNull { it.trim().toDoubleOrNull() }
                 if (at.size != 2 || at[0] !in -90.0..90.0 || at[1] !in -180.0..180.0) return refused
                 val (code, o) = call(WEATHER + "?latitude=${at[0]}&longitude=${at[1]}" +
-                    "&current=temperature_2m,weather_code,is_day&timezone=auto&forecast_days=1", null, null, null)
+                    "&current=temperature_2m,weather_code,is_day" +
+                    "&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max,weather_code,sunrise,sunset" +
+                    "&timezone=auto&forecast_days=2", null, null, null)
                 val c = o?.optJSONObject("current")
                 if (code != 200 || c == null || !c.has("temperature_2m")) { note("weather: answered $code"); return failed(code, o) }
                 JSONObject().put("ok", true).put("temp", c.optDouble("temperature_2m"))
                     .put("code", c.optInt("weather_code")).put("is_day", c.optInt("is_day") == 1)
+                    .put("daily", o.optJSONObject("daily") ?: JSONObject())
             }
             else -> refused
         }

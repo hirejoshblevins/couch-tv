@@ -57,6 +57,8 @@
     "greeting": false,
     "photo_seconds": 60,
     "rest_minutes": 10,
+    "camera_tiles": 2,
+    "person_alerts": ["Front Porch"],
     "stay_awake": false
   }
 }

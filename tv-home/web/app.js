@@ -607,6 +607,27 @@
   }
 
   // Open-Meteo gives Celsius; Fahrenheit is worked out here when Home settings asks for it.
+  // The second weather line of the greeting stack: today's high and low, rain or snow when it is
+  // likely (30% or more), and the next sunrise or sunset. Only what changes what you wear or do.
+  function wxMore(w, now) {
+    var dl = w && w.daily;
+    if (!dl || !dl.temperature_2m_max || !isFinite(dl.temperature_2m_max[0])) return "";
+    var deg = function (c) { return Math.round(WX_F ? c * 9 / 5 + 32 : c) + "\u00B0"; };
+    var parts = ["High " + deg(dl.temperature_2m_max[0]), "Low " + deg(dl.temperature_2m_min[0])];
+    var pop = dl.precipitation_probability_max ? dl.precipitation_probability_max[0] : null;
+    var dc = dl.weather_code ? dl.weather_code[0] : 0;
+    if (isFinite(pop) && pop >= 30) parts.push(pop + "% " + ((dc >= 71 && dc <= 77) || dc === 85 || dc === 86 ? "snow" : "rain"));
+    var at = function (v) { var m = /^(\d+)-(\d+)-(\d+)T(\d+):(\d+)/.exec(v || ""); return m ? new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]) : null; };
+    var sun = [["Sunrise", at((dl.sunrise || [])[0])], ["Sunset", at((dl.sunset || [])[0])], ["Sunrise", at((dl.sunrise || [])[1])]];
+    for (var i = 0; i < sun.length; i++) {
+      var tm = sun[i][1];
+      if (!tm || tm <= now) continue;
+      var hh = tm.getHours(), mm = (tm.getMinutes() < 10 ? "0" : "") + tm.getMinutes();
+      parts.push(sun[i][0] + " " + (CLOCK24 ? hh + ":" + mm : ((hh % 12) || 12) + ":" + mm + " " + (hh < 12 ? t("am") : t("pm"))));
+      break;
+    }
+    return parts.join("  \u00B7  ");
+  }
   function tempText(c) { return WX_F ? Math.round(c * 9 / 5 + 32) + "°F" : c + "°"; }
   function wxText(w) { var k = WMO_KEY[w.code]; return k ? t(k) : (w.text || ""); }
 
@@ -632,7 +653,7 @@
     if (iov) iov.classList.toggle("quiet-hours", isQuietHours(SMART_IDLE.quiet_hours));
     fitDate();
     if (window.googleHome) {   // the greeting stack (ghome.js) is fed from this clock
-      var gw = WX_SHOW && data.weather && data.weather.temp != null ? { temp: tempText(data.weather.temp), text: wxText(data.weather) } : null;
+      var gw = WX_SHOW && data.weather && data.weather.temp != null ? { temp: tempText(data.weather.temp), text: wxText(data.weather), more: wxMore(data.weather, d) } : null;
       window.googleHome.tick(d, hm, CLOCK24 ? "" : (h < 12 ? t("am") : t("pm")), gw, NOBODY || !PEOPLE.length ? "" : PEOPLE[whoIndex()].name);
     }
     document.body.classList.toggle("night", h >= 21 || h < 6);
@@ -1079,10 +1100,11 @@
     82: "wx_heavy_showers", 95: "wx_storms", 96: "wx_storms", 99: "wx_storms" };
   function weatherDirect() {
     var url = "https://api.open-meteo.com/v1/forecast?latitude=" + WXCFG.lat + "&longitude=" + WXCFG.lon +
-      "&current=temperature_2m,weather_code,is_day&timezone=" + encodeURIComponent(WXCFG.timezone || "auto") + "&forecast_days=1";
+      "&current=temperature_2m,weather_code,is_day&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max,weather_code,sunrise,sunset" +
+      "&timezone=" + encodeURIComponent(WXCFG.timezone || "auto") + "&forecast_days=2";
     return fetch(url).then(function (r) { return r.json(); }).then(function (j) {
       var c = j.current, code = Math.round(c.weather_code);
-      return { temp: Math.round(c.temperature_2m), code: code, text: "", is_day: !!c.is_day };
+      return { temp: Math.round(c.temperature_2m), code: code, text: "", is_day: !!c.is_day, daily: j.daily || null };
     }).catch(function (e) {
       // the page's own request failed (seen on a Sony Google TV): the launcher makes the same one
       var gh = window.googleHome;
@@ -4735,12 +4757,13 @@
     resume: function () { toggleScreenOff(false); setIdleAmbient(false); resetSmartIdle(); okReset(); refresh(); if (!OFFLINE) refreshQuick(); refreshWeather(); startVideo(); sceneVideos(true); refreshMusic(); if (window.AmbientWeather) window.AmbientWeather.resume(); resetIdlePhoto(); if (window.googleCams) window.googleCams.resume(); if (window.googleHome) window.googleHome.resume(); },
     // an app is in front: the video background stops until the home is back
     // the doorbell (GoogleBell.kt): whatever is open closes and that camera fills the screen
-    ring: function (key) {
+    ring: function (key, how) {
       if (kidsOn() || !window.googleCams || !window.googleCams.ring) return;
+      if (how === "alert") { window.googleCams.alert(String(key)); return; }   // a person seen: marked, nothing opens
       toggleScreenOff(false); setIdleAmbient(false);
       if (["grid", "shelf", "people", "quick", "np", "thermo", "cams", "photo"].indexOf(zone) < 0) kidsCover();
       if (expanded) { expanded = false; renderGrid(); }
-      if (!window.googleCams.ring(String(key))) return;
+      if (!window.googleCams.ring(String(key), how)) return;
       zone = "cams";
       resetIdlePhoto(); resetSmartIdle();
       paintFocus();

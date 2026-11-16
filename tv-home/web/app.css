@@ -636,6 +636,16 @@ html.still .tile.focus .face, html.still .tile.focus .face::after { animation: n
 .cams[data-n="4"] .cam { width: 26rem; height: 16.25rem; }
 /* the full apps view takes the row's place while it is open */
 html.expanded .cams { display: none; }
+/* a camera with no tile (reached from the big view only) */
+.cam.extra { display: none; }
+.cam.extra.big { display: block; }
+/* a person seen on this camera: the tile is ringed and says so for half a minute */
+.cam.alert { box-shadow: 0 0 0 0.25rem #ffb52e, 0 1rem 2.5rem rgba(0, 0, 0, 0.45); animation: cam-alert 1600ms ease-in-out infinite; }
+.cam.alert .cam-name::after { content: "\00B7  Person seen"; margin-left: 0.5rem; color: #ffd27a; }
+@keyframes cam-alert { 50% { box-shadow: 0 0 0 0.25rem rgba(255, 181, 46, 0.35), 0 1rem 2.5rem rgba(0, 0, 0, 0.45); } }
+.cam.big.ring.person::before { content: "Person seen"; }
+.cam-note { position: fixed; z-index: 27; left: 50%; top: 28rem; transform: translateX(-50%); padding: 0.5rem 1.25rem; border-radius: 62rem; background: rgba(8, 12, 16, 0.8); color: #ffd27a; font-size: 1.375rem; line-height: 2rem; opacity: 0; pointer-events: none; transition: opacity 400ms ease; }
+.cam-note.on { opacity: 1; }
 .cam.focus { box-shadow: 0 0 0 0.3125rem #fff, 0 1.5rem 3.5rem rgba(0, 0, 0, 0.5); transform: scale(1.03); }
 /* OK on a camera: it fills the screen, whole and uncropped, until OK or Back */
 html.cam-big .home, html.cam-big .cams { z-index: 28; }
@@ -684,6 +694,9 @@ html.ambient-active .ghphoto, html.ambient-active .ghstack, html.ambient-active 
 .gh-time small { font-size: 2.25rem; line-height: 1; font-weight: 400; letter-spacing: 0; margin-left: 0.5rem; }
 .gh-wx { margin-top: 0; font-size: 1.75rem; line-height: 2.25rem; color: rgba(255, 255, 255, 0.85); }
 .gh-wx b { font-weight: 600; color: #fff; }
+/* today's high and low, rain or snow when likely, the next sunrise or sunset: one quiet line */
+.gh-more { margin-top: 0.25rem; font-size: 1.25rem; line-height: 1.75rem; color: rgba(255, 255, 255, 0.68); letter-spacing: 0.01em; white-space: pre; }
+.gh-more:empty { display: none; }
 /* the stack replaces the scenes' own clocks and the date line */
 .has-ghstack .gclock, .has-ghstack .date, .has-ghstack .time, .has-ghstack .place { display: none; }
 

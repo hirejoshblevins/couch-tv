@@ -102,6 +102,12 @@ def google_home():
         out[key] = v
     cams = gh.get("cameras")
     out["cameras"] = [str(c).strip()[:60] for c in cams if str(c).strip()][:4] if isinstance(cams, list) else []
+    tiles = gh.get("camera_tiles")
+    if isinstance(tiles, int) and not isinstance(tiles, bool) and 1 <= tiles <= 4:
+        out["camera_tiles"] = tiles
+    alerts = gh.get("person_alerts")
+    if isinstance(alerts, list):
+        out["person_alerts"] = [str(c).strip()[:60] for c in alerts if str(c).strip()][:4]
     out["thermostat"] = gh.get("thermostat") is True
     out["greeting"] = gh.get("greeting") is True
     out["stay_awake"] = gh.get("stay_awake") is True

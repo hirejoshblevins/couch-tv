@@ -175,6 +175,11 @@ class MainActivity : Activity() {
             return
         }
         // The Google Home doorbell (GoogleBell.kt): open that camera over the whole screen.
+        // A camera saw a person while the home is in front: marked on the home, nothing opens.
+        intent.getStringExtra("gh_alert")?.let { key ->
+            if (RING_KEY.matches(key)) js("window.tv && tv.ring && tv.ring(\"$key\", \"alert\")")
+            return
+        }
         intent.getStringExtra("gh_ring")?.let { key ->
             if (RING_KEY.matches(key)) main.postDelayed({ js("window.tv && tv.ring && tv.ring(\"$key\")") }, 400)
             return

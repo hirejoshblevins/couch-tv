@@ -63,7 +63,8 @@
   // ---------------- one camera ----------------
   function mark(c, state) {
     if (state) c.state = state;
-    c.el.className = "cam" + (c.state === "live" ? " live" : "") + (c.parked || c.held ? " still" : "") + (c.focus ? " focus" : "") + (c.big ? " big" : "") + (c.big && ringing ? " ring" : "");
+    c.el.className = "cam" + (c.state === "live" ? " live" : "") + (c.parked || c.held ? " still" : "") + (c.focus ? " focus" : "") + (c.big ? " big" : "") + (c.big && ringing ? " ring" + (ringing === "person" ? " person" : "") : "") +
+      (c.extra ? " extra" : "") + (c.alert ? " alert" : "");
   }
 
   // Google wants the offer whole: wait for the candidates, but never for long.
@@ -134,6 +135,9 @@
   // Then the cameras take turns. The one waiting keeps its last picture (a still), and the one
   // in focus over the whole screen, or whose doorbell rang, always gets a turn at once.
   function liveCams() { return cams.filter(function (x) { return x.state === "live"; }); }
+  // The cameras with a tile on the home. An "extra" camera has none (this TV plays two at a time):
+  // it is reached with Left and Right in the big view, where it takes a tile camera's place.
+  function tiles() { return cams.filter(function (x) { return !x.extra; }); }
   function noPicture(c) {
     var n = liveCams().length;
     c.blank = (c.blank || 0) + 1;
@@ -181,13 +185,19 @@
       soloTimer = setTimeout(function () { if (big && cams[at] === c && c.state !== "live" && c.pc) solo(c); }, SOLO_MS);
     }, 700);
   }
+  // The big view closed: an extra camera stops, and the tiles that made room for it (or for a
+  // camera that needed the TV to itself) start again.
   function unsolo() {
     clearTimeout(soloTimer);
-    if (!soloed) return;
+    var k, was = soloed, need = soloed;
     soloed = false;
-    log("big view closed: all cameras again");
-    for (var k = 0; k < cams.length; k++) if (cams[k].parked) { cams[k].parked = false; cams[k].held = true; mark(cams[k]); }
+    for (k = 0; k < cams.length; k++) if (cams[k].extra && (cams[k].pc || !cams[k].parked)) { park(cams[k]); need = true; }
+    if (maxLive >= tiles().length) for (k = 0; k < cams.length; k++) if (!cams[k].extra && cams[k].parked) need = true;
+    if (!need) return;
+    log("big view closed: the home's cameras again");
+    if (was || maxLive >= tiles().length) for (k = 0; k < cams.length; k++) if (!cams[k].extra && cams[k].parked) { cams[k].parked = false; cams[k].held = true; mark(cams[k]); }
     startAll();
+    rotateSoon();
   }
   function hold(c) { if (c.state === "live") { still(c); c.held = true; } }
   // For the log: how far the stream got (the network path, then data arriving, then decoding).
@@ -226,17 +236,17 @@
   }
   function rotateSoon() {
     clearTimeout(rotateTimer);
-    if (maxLive >= cams.length || !showing || soloed) return;
+    if (maxLive >= tiles().length || !showing || soloed) return;
     rotateTimer = setTimeout(function () { swap(null); rotateSoon(); }, ROTATE_MS);
   }
   // Give the camera that has waited longest (or `want`) a turn, in place of the one playing longest.
   function swap(want) {
     if (!showing) return;
-    var waiting = cams.filter(function (x) { return x.parked; }).sort(function (a, b) { return a.parkedAt - b.parkedAt; });
+    var waiting = cams.filter(function (x) { return x.parked && !x.extra; }).sort(function (a, b) { return a.parkedAt - b.parkedAt; });
     var inC = want && want.parked ? want : waiting[0];
     if (!inC) return;
     var keep = cams[at] && (big || focused) ? cams[at] : null;
-    var playing = liveCams().filter(function (x) { return x !== keep && x !== inC; }).sort(function (a, b) { return a.since - b.since; });
+    var playing = liveCams().filter(function (x) { return x !== keep && x !== inC; }).sort(function (a, b) { return (a.extra ? 0 : 1) - (b.extra ? 0 : 1) || a.since - b.since; });   // an extra camera gives way first
     var outC = playing[0];
     if (!outC && liveCams().length >= maxLive) return;
     if (outC) park(outC);
@@ -305,7 +315,7 @@
       el.appendChild(canvas); el.appendChild(video); el.appendChild(name);
       row.appendChild(el);
       var c = { n: k, name: String(list[k].name || list[k].key), key: String(list[k].key), el: el, video: video, pc: null, session: null, renew: null, retry: null, tries: 0, state: "wait", last: -1, stalls: 0, limited: false, focus: false, big: false,
-        canvas: canvas, parked: false, parkedAt: 0, since: 0, noPic: null };
+        canvas: canvas, parked: !!list[k].extra, parkedAt: 0, since: 0, noPic: null, extra: !!list[k].extra, alert: false, alertTimer: null };
       mark(c, "wait");
       (function (cam) {
         cam.video.addEventListener("playing", function () {
@@ -322,8 +332,8 @@
       })(c);
       cams.push(c);
     }
-    document.documentElement.classList.toggle("has-cams", cams.length > 0);
-    row.setAttribute("data-n", String(cams.length));
+    document.documentElement.classList.toggle("has-cams", tiles().length > 0);
+    row.setAttribute("data-n", String(tiles().length));
   }
 
   // Start every camera that is not already up, together (a moment apart). A TV gives out its
@@ -332,7 +342,7 @@
   // picture. When the cameras take turns, the biggest pictures go first and the rest wait.
   var seqTimer = null;
   function order() {
-    return cams.slice().sort(function (a, b) { return (sizes[b.name] || 1e12) - (sizes[a.name] || 1e12) || a.n - b.n; });
+    return tiles().sort(function (a, b) { return (sizes[b.name] || 1e12) - (sizes[a.name] || 1e12) || a.n - b.n; });
   }
   function startAll() {
     clearTimeout(seqTimer);
@@ -356,7 +366,7 @@
   // Every stream stopped and started again together. Each tile keeps its last picture meanwhile.
   function restartAll() {
     clearTimeout(seqTimer);
-    for (var k = 0; k < cams.length; k++) { hold(cams[k]); cams[k].parked = false; stop(cams[k]); }
+    for (var k = 0; k < cams.length; k++) { hold(cams[k]); cams[k].parked = !!cams[k].extra; stop(cams[k]); }
     seqTimer = setTimeout(startAll, 1500);
   }
 
@@ -389,7 +399,7 @@
     if (!listed) return list();
     if (was) return;
     // back from an app with every stream stopped: find out afresh how many this TV plays at once
-    if (!cams.some(function (x) { return x.pc; })) { maxLive = 99; together = 0; soloed = false; for (var j = 0; j < cams.length; j++) { cams[j].parked = false; cams[j].held = false; cams[j].blank = 0; mark(cams[j]); } }
+    if (!cams.some(function (x) { return x.pc; })) { maxLive = 99; together = 0; soloed = false; for (var j = 0; j < cams.length; j++) { cams[j].parked = !!cams[j].extra; cams[j].held = false; cams[j].blank = 0; mark(cams[j]); } }
     for (var k = 0; k < cams.length; k++) cams[k].tries = 0;
     startAll();
     rotateSoon();
@@ -418,43 +428,70 @@
     for (var k = 0; k < cams.length; k++) { cams[k].focus = focused && k === at; cams[k].big = big && k === at; mark(cams[k]); }
     document.documentElement.classList.toggle("cam-big", big);
   }
-  function any() { return cams.length > 0; }
+  function any() { return tiles().length > 0; }
+  function most() { return (big ? cams.length : tiles().length) - 1; }   // the last camera Left and Right reach
+  function inRow() { if (!big && cams[at] && cams[at].extra) at = Math.max(0, tiles().length - 1); }
   function middle(k) { var b = cams[k].el.getBoundingClientRect(); return b.left + b.width / 2; }
   // Land on the camera nearest to x (the app or button the focus came from), or "first" / "last".
   function land(where) {
     if (!cams.length) return;
+    var n = tiles().length;
     if (where === "first") at = 0;
-    else if (where === "last") at = cams.length - 1;
+    else if (where === "last") at = n - 1;
     else if (typeof where === "number") {
       var best = 0, far = Infinity;
-      for (var k = 0; k < cams.length; k++) { var d = Math.abs(middle(k) - where); if (d < far) { far = d; best = k; } }
+      for (var k = 0; k < cams.length; k++) { if (cams[k].extra) continue; var d = Math.abs(middle(k) - where); if (d < far) { far = d; best = k; } }
       at = best;
     }
-    at = Math.max(0, Math.min(cams.length - 1, at));
+    at = Math.max(0, Math.min(n - 1, at));
   }
   function paint(yes) {
     if (!yes && !focused && !big) return;
     focused = !!yes;
-    if (!yes) { big = false; quiet(); }
+    if (!yes) { big = false; quiet(); inRow(); }
     draw();
     if (!big) unsolo();
   }
   // Returns "up" or "down" when the press leaves the row, else nothing.
   function move(dx, dy) {
-    if (dx) { at = Math.max(0, Math.min(cams.length - 1, at + dx)); draw(); front(); return null; }
+    if (dx) { at = Math.max(0, Math.min(most(), at + dx)); draw(); front(); return null; }
     if (big) return null;
     return dy < 0 ? "up" : "down";
   }
   function quiet() { clearTimeout(ringTimer); ringing = false; }
-  function ok() { if (cams[at]) { big = !big; quiet(); draw(); if (big) front(); else unsolo(); } }
-  function back() { if (!big) return false; big = false; quiet(); draw(); unsolo(); return true; }
-  function small() { if (big) { big = false; quiet(); draw(); unsolo(); } }
+  function ok() { if (cams[at]) { big = !big; quiet(); inRow(); draw(); if (big) front(); else unsolo(); } }
+  function back() { if (!big) return false; big = false; quiet(); inRow(); draw(); unsolo(); return true; }
+  function small() { if (big) { big = false; quiet(); inRow(); draw(); unsolo(); } }
   // Someone pressed the doorbell (GoogleBell.kt, through tv.ring in app.js): that camera opens
   // over the whole screen with a line saying so. True when there is such a camera.
-  function ring(key) {
+  // A camera saw a person while the home is in front (GoogleBell.kt): its tile is marked for half a
+  // minute, and a camera with no tile gets a line saying so. Nothing opens and the focus stays put.
+  function alert(key) {
+    for (var k = 0; k < cams.length; k++) {
+      var c = cams[k];
+      if (c.key !== key) continue;
+      log("person seen: " + c.key);
+      if (big && at === k) return true;
+      if (c.extra) { note("Person seen \u00B7 " + c.name); return true; }
+      c.alert = true; mark(c);
+      clearTimeout(c.alertTimer);
+      c.alertTimer = setTimeout((function (cam) { return function () { cam.alert = false; mark(cam); }; })(c), 30000);
+      return true;
+    }
+    return false;
+  }
+  var noteEl = null, noteTimer = null;
+  function note(text) {
+    if (!noteEl) { noteEl = document.createElement("div"); noteEl.className = "cam-note"; document.body.appendChild(noteEl); }
+    noteEl.textContent = text;
+    noteEl.classList.add("on");
+    clearTimeout(noteTimer);
+    noteTimer = setTimeout(function () { noteEl.classList.remove("on"); }, 30000);
+  }
+  function ring(key, kind) {
     for (var k = 0; k < cams.length; k++) {
       if (cams[k].key !== key) continue;
-      at = k; focused = true; big = true; ringing = true;
+      at = k; focused = true; big = true; ringing = kind === "person" ? "person" : true;
       clearTimeout(ringTimer);
       ringTimer = setTimeout(function () { ringing = false; draw(); }, 45000);
       draw();
@@ -467,7 +504,7 @@
   function x() { return cams[at] ? middle(at) : innerWidth / 2; }
 
   window.googleCams = { reply: reply, pause: pause, resume: resume, on: on,
-    any: any, land: land, paint: paint, move: move, ok: ok, back: back, small: small, x: x, ring: ring };
+    any: any, land: land, paint: paint, move: move, ok: ok, back: back, small: small, x: x, ring: ring, alert: alert };
 
   resume();
 })();

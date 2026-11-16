@@ -74,7 +74,7 @@
   // wx the weather ({ temp: "58°F", text: "Clear" }) or null, name who is watching or "".
   function tick(d, hm, ampm, wx, name) {
     if (!started || !info().greeting) return;
-    var key = [d.getDate(), d.getHours(), hm, ampm, wx ? wx.temp + wx.text : "", name].join("|");
+    var key = [d.getDate(), d.getHours(), hm, ampm, wx ? wx.temp + wx.text + (wx.more || "") : "", name].join("|");
     if (key === shown) return;
     shown = key;
     var days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
@@ -87,6 +87,8 @@
     var w = $("gh-wx");
     w.textContent = "";
     if (wx) { w.appendChild(el("b", "", wx.temp)); w.appendChild(document.createTextNode(" " + wx.text)); }
+    var more = $("gh-more");
+    if (more) more.textContent = wx && wx.more ? wx.more : "";
   }
 
   // ======================= the photo frame =======================
@@ -465,7 +467,7 @@
   function weather(lat, lon) {
     return ask("weather", "", lat + "," + lon).then(function (r) {
       if (!r || !r.ok || !isFinite(r.temp)) throw new Error("no weather");
-      return { temp: Math.round(r.temp), code: Math.round(r.code), text: "", is_day: !!r.is_day };
+      return { temp: Math.round(r.temp), code: Math.round(r.code), text: "", is_day: !!r.is_day, daily: r.daily || null };
     });
   }
   window.googleHome = { reply: reply, tick: tick, weather: weather, resume: resume, pause: pause,
