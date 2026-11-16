@@ -663,7 +663,7 @@ html.lighter .cam video { transition: none; }
 .ghphoto, .ghstack, .ghdial { display: none; position: fixed; z-index: 2; transition: opacity 300ms var(--ease); }
 html.ambient-active .ghphoto, html.ambient-active .ghstack, html.ambient-active .ghdial, html.ambient-active .cams { opacity: 0; }
 .has-ghphoto .ghphoto {
-  display: block; left: var(--safe-x); top: 3rem; width: 18.75rem; height: 18.75rem; border-radius: 2.25rem; overflow: hidden;
+  display: block; left: var(--safe-x); top: 3rem; width: 18.75rem; height: 18.75rem; border-radius: 50%; overflow: hidden;
   background: rgba(10, 14, 18, 0.72); box-shadow: inset 0 0 0 0.0625rem rgba(255, 255, 255, 0.16), 0 1rem 2.5rem rgba(0, 0, 0, 0.35);
 }
 .ghphoto { transition: box-shadow 200ms var(--ease), transform 200ms var(--ease), opacity 300ms var(--ease); }
@@ -717,13 +717,16 @@ html.has-ghdial .quick { margin-top: 21.5rem; }
 html.has-ghdial.has-ghstack .clock .np { display: none; }
 /* rest mode (ghome.js): what never moves goes, the rest dims and drifts. For OLEDs. */
 html.gh-rest .top-left, html.gh-rest .quick, html.gh-rest .quick-note, html.gh-rest .np, html.gh-rest .shelf, html.gh-rest .apps,
-html.gh-rest .ghdial, html.gh-rest .cam-name, html.gh-rest .gh-hello {
+html.gh-rest .cam-name, html.gh-rest .gh-hello {
   opacity: 0; visibility: hidden; pointer-events: none; transition: opacity 1200ms ease, visibility 0s linear 1200ms;
 }
 html.gh-rest body::after { content: ""; position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 25; pointer-events: none; background: rgba(0, 0, 0, 0.55); animation: gh-dim 1500ms ease both; }
 @keyframes gh-dim { from { opacity: 0; } to { opacity: 1; } }
 /* the clock, the cameras and the photo then float about the screen, shrunk a little: ghome.js moves them */
-html.gh-rest .cam, html.gh-rest .ghphoto, html.gh-rest .ghstack { box-shadow: none; transition: none; will-change: transform; }
+html.gh-rest .cam, html.gh-rest .ghphoto, html.gh-rest .ghstack, html.gh-rest .ghdial { box-shadow: none; transition: none; will-change: transform; }
+html.gh-rest .ghdial { box-shadow: inset 0 0 0 0.125rem rgba(255, 255, 255, 0.22); }
+/* the cameras stay at full brightness: their layer goes above the dimming (everything else in it is hidden) */
+html.gh-rest .home, html.gh-rest .cams { z-index: 26; }
 html.lighter .ghdial { transition: none; }
 html.lighter .ghphoto img { transition: none; }
 

@@ -89,6 +89,14 @@ class MainActivity : Activity() {
             finish()
             return
         }
+        // Asked by hand to stand aside (five quick Home presses, Failsafe.kt): started as the home,
+        // pass it on to the TV's own home. Opened from the list of apps, or sent new settings: back in charge.
+        if (cameBack(intent)) Failsafe.set(this, false)
+        else if (Failsafe.on(this) && intent?.hasCategory(Intent.CATEGORY_HOME) == true &&
+            CrashGuard.openStockHome(this, "standing aside, asked for by hand")) {
+            finish()
+            return
+        }
         CrashGuard.started(this)
         main.postDelayed({ CrashGuard.settled(this) }, CrashGuard.SETTLE_MS)
         // Lets a computer inspect the page over ADB (chrome://inspect). Only reachable with ADB access.
@@ -141,8 +149,18 @@ class MainActivity : Activity() {
         return caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET)
     }
 
+    /** Opened on purpose from the TV's list of apps, or by apply.sh with new settings. */
+    private fun cameBack(i: Intent?): Boolean = i != null && (i.hasCategory(Intent.CATEGORY_LAUNCHER) ||
+        i.hasCategory(Intent.CATEGORY_LEANBACK_LAUNCHER) || i.hasExtra("bridge") || i.hasExtra("config_b64"))
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        if (cameBack(intent)) Failsafe.set(this, false)
+        else if (intent.hasCategory(Intent.CATEGORY_HOME)) {
+            // a Home press that reached couch-tv: counted where the Home key itself is not seen
+            if (!Failsafe.keysSeen && Failsafe.homePress(this)) return
+            if (Failsafe.on(this) && CrashGuard.openStockHome(this, "standing aside, asked for by hand")) return
+        }
         if (intent.hasExtra("bridge") || intent.hasExtra("config_b64")) {
             readExtras(intent)
             pageReady = false

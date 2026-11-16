@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Window changes only: no content reading, no feedback. On a Xiaomi TV only, the code also switches
-     on key filtering at run time (the Home and Mi keys, see FireWatch.onKeyEvent); other TVs never get it. -->
+<!-- Window changes only: no content reading, no feedback. The code also switches on key filtering at run
+     time: this fork counts Home presses on every TV (five quick ones stand couch-tv aside, Failsafe.kt),
+     and on a Xiaomi TV the Home and Mi keys are handled (FireWatch.onKeyEvent). No other key is looked at. -->
 <!-- canRetrieveWindowContent is declared only so the TV delivers the events: some builds (a TCL
      Smart TV Pro on Android 12) hand window-change events only to services with this capability.
      The code reads nothing but the event's package and class names, never the screen. -->

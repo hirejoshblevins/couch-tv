@@ -22,6 +22,11 @@
   var showing = !document.hidden;
 
   function native() { return window.TVGH || null; }
+  // How long before rest mode: config.json's rest_minutes, or what Home settings chose on this TV.
+  var REST_KEY = "tvhome.restmin";
+  function restSaved() { try { var v = localStorage.getItem(REST_KEY); return v == null || v === "" || isNaN(+v) ? null : Math.max(0, Math.min(120, +v)); } catch (e) { return null; } }
+  function restMinutes() { var v = restSaved(); return v == null ? info().rest_minutes : v; }
+  function setRest(n) { try { localStorage.setItem(REST_KEY, String(Math.max(0, Math.min(120, parseInt(n, 10) || 0)))); } catch (e) {} }
   function info() {
     if (INFO) return INFO;
     var o = {};
@@ -396,9 +401,10 @@
   function floatStart() {
     floatStop();
     var tiles = document.querySelectorAll(".cams .cam");
-    for (var k = 0; k < tiles.length; k++) floatAdd(tiles[k], 0.62);
-    if (root.classList.contains("has-ghphoto")) floatAdd($("ghphoto"), 0.85);
-    if (root.classList.contains("has-ghstack")) floatAdd($("ghstack"), 0.8, $("gh-time"));
+    for (var k = 0; k < tiles.length; k++) floatAdd(tiles[k], 1.2);
+    if (root.classList.contains("has-ghphoto")) floatAdd($("ghphoto"), 1.5);
+    if (root.classList.contains("has-ghstack")) floatAdd($("ghstack"), 1.5, $("gh-time"));
+    if (root.classList.contains("has-ghdial")) floatAdd($("ghdial"), 1.5);
     floatAt = 0;
     if (floats.length) floatFrame = requestAnimationFrame(floatStep);
   }
@@ -413,7 +419,7 @@
   function active(ok) {
     clearTimeout(restTimer); restTimer = null;
     if (restOn) { restOn = false; root.classList.remove("gh-rest"); floatStop(); }
-    if (!started || !ok || !info().rest_minutes || window.MOCK_NO_REST) return;
+    if (!started || !ok || !restMinutes() || window.MOCK_NO_REST) return;
     restTimer = setTimeout(function () {
       restTimer = null;
       if (document.hidden) return;
@@ -423,7 +429,7 @@
       if (held) { held = false; drawDial(); }
       root.classList.add("gh-rest");
       floatStart();
-    }, window.MOCK_REST_MS || info().rest_minutes * 60000);
+    }, window.MOCK_REST_MS || restMinutes() * 60000);
   }
   function resting() { return restOn; }
 
@@ -463,7 +469,7 @@
     });
   }
   window.googleHome = { reply: reply, tick: tick, weather: weather, resume: resume, pause: pause,
-    thermoOn: thermoOn, paint: paint, move: move, ok: ok, back: back, active: active, resting: resting,
+    thermoOn: thermoOn, paint: paint, move: move, ok: ok, back: back, active: active, resting: resting, restMinutes: restMinutes, setRest: setRest,
     photoOn: photoOn, photoPaint: photoPaint, photoMove: photoMove, photoOk: photoOk, photoBack: photoBack,
     log: function (what) { try { if (native() && native().log) native().log(String(what)); } catch (e) {} } };
   resume();

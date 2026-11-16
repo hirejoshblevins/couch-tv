@@ -3463,6 +3463,17 @@
         IDLE_PHOTO_SECONDS = IDLE_PHOTO_STEPS[(i + 1) % IDLE_PHOTO_STEPS.length];
         ST.idle_photo_seconds = IDLE_PHOTO_SECONDS; saveSettings(); resetIdlePhoto();
       } });
+    // Google Home (ghome.js): how long the home sits untouched before it dims and floats
+    if (window.googleHome && window.googleHome.setRest && window.TVGH) {
+      var restNow = window.googleHome.restMinutes(), REST_STEPS = [0, 5, 10, 15, 20, 30, 45, 60, 90, 120];
+      rows.push(head("Rest mode"));
+      rows.push({ kind: "cycle", key: "gh-rest-minutes", label: "Start rest mode after", sub: "With no press for this long, the home dims and everything floats around the screen. Any button brings it back.",
+        value: restNow ? restNow + " min" : t("off"), act: function () {
+          var i = REST_STEPS.indexOf(restNow);
+          window.googleHome.setRest(REST_STEPS[(i + 1) % REST_STEPS.length]);
+          resetIdlePhoto();
+        } });
+    }
     // the TV's own screensaver (Google TV's Ambient mode) and the albums it shows
     rows.push(head(t("ambient_head")));
     rows.push({ kind: "action", key: "ambient", label: t("ambient_settings"), sub: t("ambient_settings_sub"),

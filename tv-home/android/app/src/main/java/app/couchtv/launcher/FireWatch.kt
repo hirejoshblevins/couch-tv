@@ -51,25 +51,34 @@ class FireWatch : AccessibilityService() {
     private var otherAt = 0L
     private val recheck = Runnable {
         recheckPending = false
-        if (shouldRecheckBringBack(stockInFront, stockAt, ownAt, otherAt) && !CrashGuard.standingAside(this)) bringBack()
+        if (shouldRecheckBringBack(stockInFront, stockAt, ownAt, otherAt) && !aside()) bringBack()
     }
 
     override fun onInterrupt() {}
 
     /** Xiaomi TVs only (issue #54): every other TV's Home key is left exactly as before. */
+    /** couch-tv keeps crashing, or was asked by hand (five quick Home presses, Failsafe.kt) to stand aside. */
+    private fun aside() = CrashGuard.standingAside(this) || Failsafe.on(this)
+
     override fun onKeyEvent(event: KeyEvent): Boolean {
+        // Every TV: Home presses are counted for the way out by hand (Failsafe.kt). The key is passed on untouched.
+        if (event.keyCode == KeyEvent.KEYCODE_HOME && event.action == KeyEvent.ACTION_UP && event.repeatCount == 0) {
+            Failsafe.keysSeen = true
+            if (Failsafe.homePress(this)) return false
+        }
         if (!isXiaomi()) return false
         val homeKey = event.keyCode == KeyEvent.KEYCODE_HOME ||
             (event.keyCode == KeyEvent.KEYCODE_BUTTON_5 && event.scanCode == XIAOMI_MI_SCAN)
-        if (!homeKey || CrashGuard.standingAside(this)) return false
+        if (!homeKey || aside()) return false
         if (event.action == KeyEvent.ACTION_UP && event.repeatCount == 0) bringBack()
         return true
     }
 
     override fun onServiceConnected() {
         connected = true
-        // Key filtering is switched on at run time and only on Xiaomi, so no other TV sees key presses here.
-        if (isXiaomi()) runCatching {
+        // Key filtering is switched on at run time. Upstream does it only on Xiaomi; this fork does it
+        // on every TV, only to count Home presses for the way out (Failsafe.kt). No other key is looked at.
+        runCatching {
             serviceInfo = serviceInfo.also { it.flags = it.flags or AccessibilityServiceInfo.FLAG_REQUEST_FILTER_KEY_EVENTS }
         }
         homeClasses = homeActivitiesOf(this)
@@ -84,7 +93,7 @@ class FireWatch : AccessibilityService() {
         // already in front). Other Google TVs are left alone: one can start on an HDMI input or
         // live TV, and that must never be covered.
         if ((android.os.Build.MANUFACTURER.equals("Amazon", ignoreCase = true) || TclPlaceholderInput.isTcl()) &&
-            SystemClock.elapsedRealtime() < BOOT_WINDOW_MS && !CrashGuard.standingAside(this)) {
+            SystemClock.elapsedRealtime() < BOOT_WINDOW_MS && !aside()) {
             Log.i("couchtv.firewatch", "bound just after a restart: putting couch-tv in front")
             runCatching { startActivity(Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
         }
@@ -114,7 +123,9 @@ class FireWatch : AccessibilityService() {
         else if (pkg != null) otherAt = now
         amazonInFront = stockInFront && e.packageName?.toString() == AMAZON_HOME
         if (!stockInFront) return
-        if (CrashGuard.standingAside(this)) return
+        // a TV that does not show this service the Home key: the TV's home coming forward is the press
+        if (!Failsafe.keysSeen && Failsafe.homePress(this)) return
+        if (aside()) return
         val wait = DEBOUNCE_MS - (System.currentTimeMillis() - last)
         if (wait > 0) {
             // Skipped as a repeat press. Some Google TVs (seen on a Xiaomi) keep the Google home as the
